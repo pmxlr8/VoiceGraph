@@ -4,7 +4,7 @@
 
 VoiceGraph is a voice-first interactive knowledge graph platform that transforms unstructured data into rich, explorable knowledge graphs through natural conversation. Upload documents, PDFs, YouTube videos, or URLs — then talk to the graph using real-time voice to ask questions, explore connections, and refine the ontology, all while watching the AI reason visually across your data in 3D.
 
-Built for the [NYC Build With AI Hackathon](https://lu.ma/NYC-Build-with-AI).
+**[Live Demo](https://voicegraph-802587268683.us-central1.run.app)** | Built for the [NYC Build With AI Hackathon](https://lu.ma/NYC-Build-with-AI).
 
 ---
 
