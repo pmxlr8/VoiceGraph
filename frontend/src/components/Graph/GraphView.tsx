@@ -75,7 +75,6 @@ export default function GraphView() {
   const storeNodes = useGraphStore((s) => s.nodes);
   const storeEdges = useGraphStore((s) => s.edges);
   const activeNodeIds = useGraphStore((s) => s.activeNodeIds);
-  const activeEdgeIds = useGraphStore((s) => s.activeEdgeIds);
   const dimAll = useGraphStore((s) => s.dimAll);
   const selectNode = useGraphStore((s) => s.selectNode);
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId);

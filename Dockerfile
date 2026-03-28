@@ -10,12 +10,18 @@ RUN pnpm build
 FROM python:3.12-slim
 WORKDIR /app
 
+# Install system deps needed for C extensions (grpcio, numpy, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend source
+# Copy backend source (exclude .env)
 COPY backend/ ./
+RUN rm -f .env .env.local .env.production
 
 # Copy built frontend into backend/static
 COPY --from=frontend-build /app/frontend/dist ./static
