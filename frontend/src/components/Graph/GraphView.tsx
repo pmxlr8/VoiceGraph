@@ -138,6 +138,15 @@ export default function GraphView() {
     return { nodes, links };
   }, [filteredNodes, filteredEdges]);
 
+  // Configure d3 forces for better spacing with large graphs
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.d3Force('charge')?.strength(-250).distanceMax(500);
+    fg.d3Force('link')?.distance(120);
+    fg.d3Force('center')?.strength(0.05);
+  }, [graphData]);
+
   // nodeColor callback — reads highlight state from refs (always fresh)
   // Returns a NEW function reference when highlights change so ForceGraph3D
   // re-evaluates colors without rebuilding the simulation
@@ -342,6 +351,15 @@ export default function GraphView() {
         linkDirectionalParticleColor={getLinkParticleColor}
         linkDirectionalParticleWidth={1.4}
         linkHoverPrecision={2}
+        d3AlphaDecay={0.01}
+        d3VelocityDecay={0.2}
+        warmupTicks={80}
+        cooldownTicks={300}
+        onEngineStop={() => {
+          // Spread nodes further apart after initial simulation
+          const fg = fgRef.current;
+          if (fg) fg.zoomToFit(400, 80);
+        }}
         onLinkClick={(link: FGLink) => {
           if (fgRef.current) (fgRef.current as any).emitParticle(link);
         }}

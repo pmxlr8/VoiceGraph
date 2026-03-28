@@ -2,7 +2,7 @@
 
 **Talk to your data. See it think.**
 
-VoiceGraph is a voice-first interactive knowledge graph platform that transforms unstructured data into rich, explorable knowledge graphs through natural conversation. Upload documents, PDFs, YouTube videos, or URLs — then talk to the graph using real-time voice to ask questions, explore connections, and refine the ontology, all while watching the AI reason visually across your data in 3D.
+VoiceGraph is a voice-first interactive knowledge graph that transforms unstructured data into rich, explorable knowledge graphs through natural conversation. Upload documents, PDFs, YouTube videos, or URLs — then talk to the graph using real-time voice to ask questions, explore connections, and refine the ontology, all while watching the AI reason visually across your data in 3D.
 
 **[Live Demo](https://voicegraph-802587268683.us-central1.run.app)** | Built for the [NYC Build With AI Hackathon](https://lu.ma/NYC-Build-with-AI).
 
@@ -14,13 +14,13 @@ Knowledge is trapped in disconnected silos. Research papers, meeting notes, URLs
 
 **Search fails at relationships.** Keyword search finds documents, not insights. "How does X relate to Y?" is unanswerable unless you manually trace connections yourself.
 
-**RAG isn't enough.** Vanilla RAG retrieves text chunks via cosine similarity and stuffs them into a prompt. It has no concept of entities, relationships, or graph structure. It can't traverse connections, find paths, or show you the shape of what you know. A chunk doesn't know that "Einstein" in paragraph 3 is the same person as "Albert" in paragraph 47.
+**RAG isn't enough.** Vanilla RAG retrieves text chunks via cosine similarity and stuffs them into a prompt. It has no concept of entities, relationships, or graph structure. It can't traverse connections, find paths, or show you the shape of what you know.
 
 **We don't need more text answers. We need to see connections.**
 
 ---
 
-## Why VoiceGraph Is Not "Just Another RAG App"
+## What Makes This Different — Not Just Another RAG App
 
 ### Standard RAG pipeline:
 ```
@@ -42,29 +42,84 @@ This is the difference between "find me similar text" and "build me a structured
 
 ---
 
+## Live Graph: DC & Energy Nexus Intelligence
+
+VoiceGraph isn't a toy demo with 10 nodes. Our live graph contains **569 nodes and 882 edges** of real-world intelligence about the intersection of data center expansion, grid infrastructure, and community impact in NYC:
+
+### What's in the Graph
+
+| Category | Nodes | What |
+|---|---|---|
+| **Energy Experts** | 208 | Named individuals from energy trading, grid ops, policy |
+| **Market Signals** | 148 | Regulatory filings, rate cases, grid alerts, policy shifts |
+| **Companies** | 23 | Utilities, DC operators, energy traders, developers |
+| **Facilities** | 21 | Data centers, power plants, substations, thermal networks |
+| **Organizations** | 19 | NYSERDA, NY Green Bank, advocacy groups, research labs |
+| **Concepts** | 16 | Thermal energy networks, 5GDHC, WSHP, grid congestion |
+| **Regulations** | 14 | LL97, S9144, CLCPA, IRA Section 48, UTENJA, Justice40 |
+| **Institutions** | 12 | Lincoln Hospital, Montefiore, NYCHA, DOE schools |
+| **Communities** | 9 | South Bronx CD1/CD2, Mott Haven, Hunts Point, LIC, Astoria |
+| **Infrastructure** | 8 | NYISO Zone J/G, Indian Point, Con Ed Steam, BQDM |
+| **Data Centers** | 8 | 111 8th Ave (Google), 60 Hudson, Equinix NY4/5 |
+| **Datasets** | 7 | LL84 disclosure, 311 heat complaints, NYCHA outage data |
+
+### Demo Traversal Path
+
+The killer demo path that makes judges lean forward:
+
+```
+South Bronx CD1 (highest energy burden in NYC)
+    ↓ RATE_IMPACT_ON
+Long Island City (400+ MW of pending DC interconnection)
+    ↓ GRID_STRESS_FROM
+NYISO Zone J (most constrained zone in NY state)
+    ↓ DC_LOAD_GROWTH_TRIGGERED
+S9144 Moratorium (legislative response to DC expansion)
+    ↓ REGULATORY_OFFRAMP_VIA
+UTENJA / Thermal Energy Networks (the solution)
+    ↓ HEAT_SOURCE
+Chelsea UTEN Pilot (waste heat → community heating)
+    ↓ POTENTIAL_OFFTAKER_FOR
+Lincoln Hospital ($2.1M/yr LL97 penalty → needs thermal solution)
+```
+
+Every node in that path is a real entity. Every edge has a description explaining *why* the connection exists. The voice agent traverses this live and narrates the connections.
+
+### Three "Easter Egg" Connections
+
+Non-obvious paths that no spreadsheet surfaces:
+
+1. **Google's NYC HQ at 111 8th Avenue is in Chelsea** — the same neighborhood as the UTEN pilot recovering data center waste heat for NYCHA. A hyperscaler is literally next door to the solution.
+
+2. **Indian Point's 2021 retirement left a 2,069 MW gap** in NYC's grid. Data centers filled that demand faster than renewables could. The grid strain communities feel today traces directly back to that retirement decision.
+
+3. **NYC 311 heat complaint data from NYCHA buildings is public, real-time, and geocoded.** It maps directly onto communities that would benefit most from thermal energy networks. The complaint data IS the demand signal for the solution. The traversal — `311 complaint → NYCHA building → DAC designation → UTEN eligibility → potential heat offtaker` — is the most powerful path in the graph.
+
+---
+
 ## How It Compares
 
 ### vs. ChatGPT / Gemini
-GPT and Gemini are stateless text transformers. You paste text in, you get text out. No persistent structure, no accumulated knowledge, no ability to traverse relationships. Even with file uploads, they treat documents as disposable context.
+GPT and Gemini are stateless text transformers. No persistent structure, no accumulated knowledge, no ability to traverse relationships.
 
-VoiceGraph builds a **persistent, queryable knowledge structure** that grows over time. Every document adds to the graph. Connections across documents from different sources emerge automatically through entity resolution. Ask GPT "how does X from paper A relate to Y from paper B?" and it needs both papers in context. Ask VoiceGraph the same thing and it traverses a pre-built graph path — the connection already exists as a first-class relationship.
+VoiceGraph builds a **persistent, queryable knowledge structure** that grows over time. Every document adds to the graph. Connections across documents from different sources emerge automatically through entity resolution. Ask GPT "how does X from paper A relate to Y from paper B?" and it needs both papers in context. Ask VoiceGraph the same thing and it traverses a pre-built graph path.
 
 ### vs. NotebookLM
 NotebookLM is excellent for conversational Q&A over a document collection. But it has zero structural awareness. It can't answer:
 
-- "What's the shortest path between Einstein and CERN?" — requires graph traversal
+- "What's the shortest path between entity X and entity Y?" — requires graph traversal
 - "Which entity is the most connected hub?" — requires degree centrality
-- "Show me all organizations connected to people in quantum physics" — requires typed Cypher with label constraints
-- "What clusters of topics exist?" — requires community detection algorithms
-- "Add 'Research Lab' as a new entity type and re-scan everything" — requires ontology mutation
+- "Show me all organizations connected to people in a specific domain" — requires typed Cypher
+- "What clusters exist?" — requires community detection algorithms
+- "Add a new entity type and re-scan everything" — requires ontology mutation
 
-NotebookLM also has no visualization. You can't *see* your knowledge. VoiceGraph renders a live 3D graph where you watch the AI reason — nodes light up, paths illuminate, ripples expand. Visualization reveals patterns that text answers fundamentally cannot: clusters, bridges, isolated nodes, hub entities, missing connections.
+NotebookLM also has no visualization. You can't *see* your knowledge. VoiceGraph renders a live 3D graph where you watch the AI reason — nodes light up, paths illuminate, ripples expand.
 
 ### vs. Neo4j Browser
-Powerful, but requires Cypher expertise. VoiceGraph makes graph querying accessible through natural voice conversation — you speak, the agent writes the Cypher.
+Powerful, but requires Cypher expertise. VoiceGraph makes graph querying accessible through natural voice conversation — you speak, the agent writes and executes the Cypher.
 
 ### vs. TrustGraph
-Excellent ontology-guided extraction, but 34 microservices, 12GB RAM, $180-250/mo on GKE. VoiceGraph borrows the ontology subsetting pattern but runs on Neo4j AuraDB Free ($0) + Cloud Run.
+Excellent ontology-guided extraction, but 34 microservices, 12GB RAM, $180-250/mo on GKE. VoiceGraph borrows the ontology subsetting pattern but runs on Neo4j AuraDB Free ($0) + a single Cloud Run container.
 
 ---
 
@@ -82,29 +137,22 @@ Excellent ontology-guided extraction, but 34 microservices, 12GB RAM, $180-250/m
 
 ---
 
-## Demo
-
-https://github.com/user-attachments/assets/voicegraph-demo.mp4
-
-> *Upload a document, watch the graph build, then ask it questions by voice.*
-
----
-
 ## Architecture
 
 ```
                           Voice (Gemini Live)
                                 │
                      ┌──────────┴──────────┐
-                     │   React + Reagraph   │
-                     │   3D Graph + Voice   │
+                     │   React + Three.js   │
+                     │   3D Force Graph     │
+                     │   + Thinking Anims   │
                      └──────────┬──────────┘
                            WebSocket
                      ┌──────────┴──────────┐
                      │  FastAPI + Google ADK │
                      │                      │
                      │  ┌── GraphQueryAgent  │──── Neo4j AuraDB
-                     │  ├── IngestionAgent  │     (Graph + Vectors)
+                     │  ├── IngestionAgent  │     (569 nodes, 882 edges)
                      │  ├── OntologyAgent   │
                      │  ├── CSVAnalysisAgent │
                      │  └── ExplanationAgent│
@@ -133,29 +181,41 @@ Not just semantic search — the orchestrator agent dynamically selects the righ
 
 | Tool | When | How |
 |------|------|-----|
-| **Semantic Search** | "What do we know about climate change?" | Vector similarity over entity embeddings |
-| **Entity Explorer** | "Tell me about OpenAI" | Pre-built Cypher template, 1-2 hop neighborhood traversal |
-| **Path Finder** | "How does X relate to Y?" | Shortest path via pre-built Cypher (fast + reliable) |
-| **Text2Cypher** | "Which orgs have more than 5 people?" | LLM generates Cypher from natural language + schema context |
-| **Hybrid Search** | "Explain the AI regulation landscape" | Vector search finds anchors → Cypher expands context |
+| **Semantic Search** | "What do we know about grid stress?" | Vector similarity over entity embeddings |
+| **Entity Explorer** | "Tell me about NYISO Zone J" | Pre-built Cypher template, 1-2 hop neighborhood traversal |
+| **Path Finder** | "How does Indian Point relate to S9144?" | Shortest path via pre-built Cypher (fast + reliable) |
+| **Text2Cypher** | "Which orgs have more than 5 connections?" | LLM generates Cypher from natural language + schema context |
+| **Hybrid Search** | "Explain the DC energy impact landscape" | Vector search finds anchors → Cypher expands context |
 | **Community Detection** | "What are the main themes?" | Leiden algorithm + LLM summaries |
 | **Ontology Info** | "What entity types do we have?" | Direct OWL ontology read |
 | **Graph Stats** | "How big is the graph?" | Distribution, connectivity, growth metrics |
+| **Highlight Nodes** | After any query result | Lights up relevant nodes in 3D via Three.js material mutation |
 
-Pre-built Cypher templates handle common patterns (fast + reliable). Text2Cypher is reserved for complex analytical questions the templates can't handle. Best of both worlds.
+Pre-built Cypher templates handle common patterns (fast + reliable). Text2Cypher is reserved for complex analytical questions the templates can't handle.
 
 ### Voice-First Architecture
 
-Most AI tools are text-first with voice bolted on (speech-to-text → process → text-to-speech). VoiceGraph uses Gemini Live's **native bidirectional audio streaming** — the LLM processes audio directly:
+Most AI tools are text-first with voice bolted on (STT → process → TTS). VoiceGraph uses Gemini Live's **native bidirectional audio streaming** — the LLM processes audio directly:
 
-- **Function calling mid-conversation** — while you're speaking, Gemini fires graph queries, gets results, and weaves them into its spoken response. No "wait while I process."
-- **Voice ontology editing** — say "add a relationship type called 'mentored by' between Person and Person" and the OntologyAgent fires `add_object_property("mentoredBy", "Person", "Person")`, validates with rdflib, persists as OWL Turtle, and optionally triggers selective re-extraction.
-- **Thinking animation** — the backend emits `thinking_start`, `thinking_traverse`, `thinking_ripple`, `thinking_step`, and `thinking_complete` WebSocket events *during* tool execution, before the answer is ready. Three animation modes run simultaneously:
+- **Function calling mid-conversation** — while you're speaking, Gemini fires graph queries, gets results, and weaves them into its spoken response
+- **Voice ontology editing** — say "add a relationship type called 'mentored by'" and the OntologyAgent fires the tool, validates with rdflib, persists as OWL Turtle, and optionally triggers selective re-extraction
+- **Thinking animation** — the backend emits `thinking_*` WebSocket events *during* tool execution, before the answer is ready. Three animation modes run simultaneously:
   - **Sequential path glow** — nodes light up in traversal order
   - **Ripple expansion** — concentric neighborhood reveal
   - **Thought stream** — floating panel showing reasoning steps
 
-You literally watch the AI think through the graph topology. The graph animates *before* the answer arrives.
+You watch the AI think through the graph topology. The graph animates *before* the answer arrives.
+
+### 3D Graph Rendering
+
+The graph isn't a flat diagram — it's a full 3D force-directed simulation rendered via Three.js:
+
+- **Force tuning for 500+ nodes** — custom d3 charge strength (-250), link distance (120), alpha decay (0.01) to prevent the "hairball" effect
+- **Type-based coloring** — 12+ node types each get distinct colors from a curated palette
+- **Highlight without collapse** — highlight events mutate Three.js materials directly (color, opacity) via refs, NOT by rebuilding graphData (which would reheat the force simulation and collapse all nodes into a blob)
+- **Zoom controls** — fit-to-view, zoom in/out, node dragging with pin
+- **Node sizing** — scales by connection count (hub entities are visually larger)
+- **Edge labels** — SpriteText labels at midpoints, directional arrows, particle animation on click
 
 ### WebSocket Event Protocol
 
@@ -163,7 +223,9 @@ Everything is real-time over a single WebSocket connection:
 - **Audio**: bidirectional PCM chunks (16kHz up, 24kHz down)
 - **Graph mutations**: `node_added`, `edge_added`, `graph_update`
 - **Thinking events**: 6 event types for animation coordination
+- **Highlights**: node ID + label resolution for fuzzy matching
 - **Ingestion progress**: phase-by-phase status with percentage
+- **Tool calls**: `tool_call_start` / `tool_call_result` for activity feed
 
 No polling. No REST for real-time data. Frontend routes events through typed Zustand stores.
 
@@ -179,6 +241,39 @@ Graph data gets Cypher LOAD CSV. Relational data gets SQLite with a bridge node 
 
 ---
 
+## What We Built During the Hackathon
+
+This wasn't a wrapper around an API. Here's the actual engineering work:
+
+### Graph Population Pipeline (not just "upload and pray")
+- **Custom Neo4j population scripts** — 3 separate scripts built iteratively:
+  - `populate_neo4j.py` — Base graph from SQLite + CSV sources (479 nodes, 764 edges across 13 entity types and 25 relationship types)
+  - `add_uten_nodes.py` — Thermal energy network layer (legislation, UTEN pilots, technical concepts, international precedents)
+  - `add_nyc_nodes.py` — NYC hyperlocal intelligence (9 communities, 8 grid infrastructure nodes, 8 data centers, 7 datasets, 6 anchor institutions, 7 financial mechanisms, 5 media/advocacy orgs)
+- **Entity resolution across scripts** — MERGE-based deduplication ensures nodes like "Con Edison" or "NYSERDA" referenced in multiple scripts resolve to a single graph node
+- **Rich edge descriptions** — every edge carries a human-readable `description` property explaining *why* the connection exists, not just *that* it exists
+
+### Frontend Engineering
+- **3D force graph with 500+ nodes** that doesn't collapse into a hairball — custom force parameters, direct Three.js material mutation for highlights
+- **Real-time WebSocket architecture** — single connection multiplexes voice audio, graph mutations, thinking animations, ingestion progress, and tool call status
+- **Type-based filtering** — toggle entity types on/off without rebuilding the force simulation
+- **Responsive resize tracking** — ResizeObserver-based dimension updates for the WebGL canvas
+- **Error boundary** — catches WebGL/Three.js crashes gracefully
+
+### Backend Engineering
+- **8 specialized query tools** with pre-built Cypher templates (not just Text2Cypher for everything)
+- **Gemini Live integration** — bidirectional audio streaming with function calling mid-conversation
+- **Multi-stage Docker build** — node:20-slim frontend build → python:3.12-slim backend, single container for Cloud Run
+- **Static file serving with SPA fallback** — production frontend served from FastAPI, no separate CDN needed
+- **Session affinity** for WebSocket on Cloud Run — stateful voice sessions survive load balancer routing
+
+### Deployment
+- **Single-container Cloud Run** — frontend and backend in one image, env vars for secrets
+- **Artifact Registry** — proper CI/CD-ready image pipeline (not just `gcloud run deploy --source`)
+- **Neo4j AuraDB Free** — $0 graph database, 200K node limit, production-grade Cypher + vector indexes
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Why |
@@ -186,13 +281,13 @@ Graph data gets Cypher LOAD CSV. Relational data gets SQLite with a bridge node 
 | **Voice** | Gemini Live (Multimodal Live API) | Real-time bidirectional voice with function calling mid-conversation |
 | **Agent Framework** | Google ADK | Multi-agent orchestration with 23 tools, Cloud Run deployment |
 | **Extraction LLM** | Gemini 2.5 Flash via `VertexAILLM` | Fast, cheap, multimodal |
-| **Graph Database** | Neo4j AuraDB Free | $0, instant setup, 200K nodes/400K rels, mature Cypher + vector indexes |
+| **Graph Database** | Neo4j AuraDB Free | $0, 200K nodes/400K rels, Cypher + vector indexes |
 | **KG Builder** | `neo4j-graphrag[google]` | Official Neo4j library — chunking, extraction, entity resolution, retrievers |
-| **Ontology** | `rdflib` + OWL | Lightweight OWL manipulation (no Java), Turtle serialization, JSON for agents |
-| **Visualization** | Reagraph | React-native 3D graph, built-in selections/highlighting, modern aesthetic |
-| **Frontend** | React 18 + TypeScript + Vite | Tailwind + shadcn/ui + Zustand state management |
+| **Ontology** | `rdflib` + OWL | Lightweight OWL manipulation (no Java), Turtle serialization |
+| **3D Visualization** | react-force-graph-3d + Three.js + SpriteText | Force-directed 3D graph with direct material mutation |
+| **Frontend** | React 18 + TypeScript + Vite + Tailwind + Zustand | Type-safe, fast, reactive state management |
 | **Backend** | Python FastAPI + WebSocket | Async gateway, REST API, background tasks |
-| **Deployment** | Google Cloud Run | Serverless, auto-scales, `adk deploy cloud_run` |
+| **Deployment** | Google Cloud Run (single container) | Serverless, auto-scales, session affinity for WebSocket |
 
 ---
 
@@ -209,12 +304,12 @@ Graph data gets Cypher LOAD CSV. Relational data gets SQLite with a bridge node 
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/voicegraph.git
-cd voicegraph
+git clone https://github.com/pmxlr8/VoiceGraph.git
+cd VoiceGraph
 
 # Backend
 cd backend
-python -m venv venv && source venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Frontend
@@ -227,13 +322,13 @@ pnpm install
 Create `backend/.env`:
 
 ```env
-GEMINI_API_KEY=your-gemini-api-key
+GOOGLE_API_KEY=your-gemini-api-key
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
-NEO4J_USERNAME=neo4j
+NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
 ```
 
-### Run
+### Run Locally
 
 ```bash
 # Terminal 1 — Backend
@@ -245,13 +340,30 @@ cd frontend && pnpm dev
 
 Open `http://localhost:5173` — paste some text, hit ingest, and start talking.
 
+### Deploy to Cloud Run
+
+```bash
+# Build
+docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/YOUR_PROJECT/voicegraph/app:latest .
+
+# Push
+docker push us-central1-docker.pkg.dev/YOUR_PROJECT/voicegraph/app:latest
+
+# Deploy
+gcloud run deploy voicegraph \
+  --image us-central1-docker.pkg.dev/YOUR_PROJECT/voicegraph/app:latest \
+  --region us-central1 --allow-unauthenticated --memory 1Gi \
+  --session-affinity \
+  --set-env-vars "GOOGLE_API_KEY=...,NEO4J_URI=...,NEO4J_USER=neo4j,NEO4J_PASSWORD=..."
+```
+
 ---
 
 ## Project Structure
 
 ```
 backend/
-  main.py                  # FastAPI + WebSocket server
+  main.py                  # FastAPI + WebSocket server + static SPA serving
   agents/                  # ADK orchestrator + 5 sub-agents + 23 tools
   extraction/              # 3-phase pipeline, parsers, ontology manager
   graph/                   # Neo4j client, Cypher templates
@@ -260,14 +372,24 @@ backend/
 
 frontend/src/
   components/
-    Graph/                 # Reagraph 3D visualization + thinking animations
-    VoicePanel/            # Mic capture, waveform, playback
-    LeftPanel/             # Stats, entity types, ingestion
+    Graph/                 # ForceGraph3D visualization + Three.js material mutation
+    VoicePanel/            # Mic capture, waveform, audio playback
+    LeftPanel/             # Stats, entity types, type filtering
     InfoSidebar/           # Node details, relationships
     ThoughtStream/         # Floating AI reasoning display
+    TopBar/                # Navigation, controls
+    ActivityPanel/         # Tool call activity feed
+    IngestModal/           # Document upload + ingestion UI
     OntologyView/          # Ontology browser
+    QueryView/             # Text query interface
   stores/                  # Zustand stores (graph, voice, ingestion)
   hooks/                   # WebSocket, audio capture/playback
+  types/                   # TypeScript event types
+
+scripts/
+  populate_neo4j.py        # Base graph population (479 nodes from SQLite + CSV)
+  add_uten_nodes.py        # Thermal energy network layer (50+ nodes)
+  add_nyc_nodes.py         # NYC hyperlocal intelligence (51 nodes, 59 edges)
 ```
 
 ---
@@ -279,6 +401,8 @@ Built on the shoulders of open source:
 - [`neo4j-graphrag-python`](https://github.com/neo4j/neo4j-graphrag-python) (Apache 2.0) — extraction pipeline, retrievers, entity resolution
 - [`trustgraph`](https://github.com/trustgraph-ai/trustgraph) (Apache 2.0) — ontology subsetting pattern, provenance approach
 - [`llm-graph-builder`](https://github.com/neo4j-labs/llm-graph-builder) (MIT) — YouTube parser, schema consolidation patterns
+- [`react-force-graph`](https://github.com/vasturiano/react-force-graph) (MIT) — 3D force-directed graph rendering
+- [`three-spritetext`](https://github.com/vasturiano/three-spritetext) (MIT) — text labels in Three.js scenes
 
 ---
 
