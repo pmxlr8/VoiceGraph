@@ -394,6 +394,14 @@ scripts/
 
 ---
 
+## Team
+
+- **[Pranjal Mishra](https://linkedin.com/in/pranjalmishra2002)**
+- **[Bhavesh Gupta](https://linkedin.com/in/bhaveshgupta01)**
+- **[Anzhelika Siui](https://linkedin.com/in/anzhelika-siui)**
+
+---
+
 ## Acknowledgments
 
 Built on the shoulders of open source:
