@@ -155,7 +155,7 @@ export default function GraphView() {
       const type = node.type || 'Entity';
       const baseColor = colorForType(type);
       if (dimAllRef.current) {
-        return activeNodeIdsRef.current.has(node.id) ? '#ffffff' : baseColor + '30';
+        return activeNodeIdsRef.current.has(node.id) ? '#4a6ab8' : baseColor + '30';
       }
       return baseColor;
     },
@@ -182,7 +182,7 @@ export default function GraphView() {
           const baseColor = colorForType(type);
           let color = baseColor;
           if (dimAll) {
-            color = activeNodeIds.has(node.id) ? '#ffffff' : baseColor + '30';
+            color = activeNodeIds.has(node.id) ? '#4a6ab8' : baseColor + '30';
           }
           mesh.material.color.set(color);
           if (dimAll) {
@@ -223,7 +223,7 @@ export default function GraphView() {
   const nodeThreeObject = useCallback(
     (node: FGNode) => {
       const sprite = new SpriteText(wrap(node.label, 30));
-      sprite.color = selectedNodeId === node.id ? '#ffffff' : '#d1d5db';
+      sprite.color = selectedNodeId === node.id ? '#1e243c' : 'rgba(30,36,60,0.55)';
       sprite.textHeight = 3.5;
       sprite.fontWeight = selectedNodeId === node.id ? 'bold' : 'normal';
       sprite.position.y = 12; // offset above the sphere
@@ -244,7 +244,7 @@ export default function GraphView() {
   // Link label as SpriteText
   const linkThreeObject = useCallback((link: FGLink) => {
     const sprite = new SpriteText(wrap(String(link.label || ''), 30));
-    sprite.color = 'rgba(255, 255, 255, 0.35)';
+    sprite.color = 'rgba(60, 72, 110, 0.35)';
     sprite.textHeight = 2.0;
     return sprite;
   }, []);
@@ -270,17 +270,17 @@ export default function GraphView() {
     const sourceNode = typeof link.source === 'object' ? link.source : null;
     if (dimAllRef.current && sourceNode) {
       const isActive = activeNodeIdsRef.current.has(sourceNode.id);
-      return isActive ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.05)';
+      return isActive ? 'rgba(74, 106, 184, 0.5)' : 'rgba(100, 110, 130, 0.08)';
     }
     if (sourceNode) {
       const baseColor = colorForType(sourceNode.type);
-      return baseColor + '60';
+      return baseColor + '40';
     }
-    return 'rgba(255, 255, 255, 0.25)';
+    return 'rgba(100, 110, 130, 0.30)';
   }, []);
 
   // Link particle color
-  const getLinkParticleColor = useCallback(() => '#f59e0b', []);
+  const getLinkParticleColor = useCallback(() => '#6b8dd6', []);
 
   if (storeNodes.length === 0) {
     return (
@@ -330,7 +330,7 @@ export default function GraphView() {
         nodeRelSize={5}
         enableNodeDrag={true}
         nodeColor={getNodeColor}
-        backgroundColor="#050507"
+        backgroundColor="rgba(0,0,0,0)"
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={true}
         onNodeClick={handleNodeClick}
@@ -375,7 +375,7 @@ export default function GraphView() {
               fg.cameraPosition({ z: dist * 0.75 }, undefined, 300);
             }
           }}
-          className="h-9 w-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary bg-black/60 border border-white/[0.08] hover:bg-white/[0.06] transition-colors text-lg"
+          className="glass-3 h-9 w-9 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors text-lg"
         >
           +
         </button>
@@ -387,7 +387,7 @@ export default function GraphView() {
               fg.cameraPosition({ z: dist * 1.35 }, undefined, 300);
             }
           }}
-          className="h-9 w-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary bg-black/60 border border-white/[0.08] hover:bg-white/[0.06] transition-colors text-lg"
+          className="glass-3 h-9 w-9 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors text-lg"
         >
           -
         </button>
@@ -396,7 +396,7 @@ export default function GraphView() {
             const fg = fgRef.current;
             if (fg) fg.zoomToFit(400);
           }}
-          className="h-9 w-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary bg-black/60 border border-white/[0.08] hover:bg-white/[0.06] transition-colors text-xs"
+          className="glass-3 h-9 w-9 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors text-xs"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
@@ -404,9 +404,9 @@ export default function GraphView() {
         </button>
       </div>
 
-      {/* Status indicator — bottom left like TrustGraph */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-2 text-[11px] text-text-muted z-10">
-        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+      {/* Status indicator — bottom left */}
+      <div className="glass-4 absolute bottom-3 left-3 flex items-center gap-2 text-[11px] text-text-secondary px-2.5 py-1 z-10">
+        <span className="h-2 w-2 rounded-full" style={{ background: '#96e0b8', boxShadow: '0 0 6px rgba(150,224,184,0.6)' }} />
         Ready
       </div>
     </div>

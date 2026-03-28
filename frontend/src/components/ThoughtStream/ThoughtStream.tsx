@@ -18,7 +18,7 @@ export default function ThoughtStream() {
 
   return (
     <div
-      className="panel flex flex-col overflow-hidden"
+      className="glass-1 flex flex-col overflow-hidden"
       style={{ width: '300px', maxHeight: '280px' }}
     >
       {/* Header */}
@@ -26,21 +26,29 @@ export default function ThoughtStream() {
         <div className="flex items-center gap-2">
           {isThinking && (
             <span
-              className="h-[6px] w-[6px] rounded-full bg-accent"
+              className="h-[6px] w-[6px] rounded-full"
               style={{
-                boxShadow: '0 0 8px rgba(245,158,11,0.5)',
+                background: 'linear-gradient(135deg, #6b8dd6, #9b6bd6)',
+                boxShadow: '0 0 8px rgba(107,141,214,0.5)',
                 animation: 'glow-pulse 1s ease-in-out infinite',
               }}
             />
           )}
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
+          <span
+            className="text-[11px] font-semibold uppercase"
+            style={{
+              fontFamily: "'Syne', sans-serif",
+              letterSpacing: '0.08em',
+              color: isThinking ? '#6b8dd6' : 'rgba(80,100,140,0.40)',
+            }}
+          >
             {isThinking ? 'Reasoning' : 'Done'}
           </span>
         </div>
         {!isThinking && (
           <button
             onClick={thinkingClear}
-            className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-md hover:bg-white/[0.05]"
+            className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-md"
           >
             <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -49,11 +57,14 @@ export default function ThoughtStream() {
         )}
       </div>
 
-      <div className="mx-4 border-t border-border" />
+      <div className="mx-4" style={{ borderTop: '1px solid rgba(180,200,230,0.25)' }} />
 
       {thinkingQuery && (
         <div className="px-4 py-2.5">
-          <p className="font-headline italic text-[13px] text-text-secondary/80 line-clamp-2">
+          <p
+            className="italic text-[13px] text-text-secondary line-clamp-2"
+            style={{ fontFamily: "'DM Sans', sans-serif" }}
+          >
             &ldquo;{thinkingQuery}&rdquo;
           </p>
         </div>
@@ -81,8 +92,11 @@ export default function ThoughtStream() {
             {[0, 0.15, 0.3].map((delay) => (
               <span
                 key={delay}
-                className="h-1 w-1 rounded-full bg-accent"
-                style={{ animation: `glow-pulse 1s ease-in-out ${delay}s infinite` }}
+                className="h-1 w-1 rounded-full"
+                style={{
+                  background: '#6b8dd6',
+                  animation: `glow-pulse 1s ease-in-out ${delay}s infinite`,
+                }}
               />
             ))}
           </div>

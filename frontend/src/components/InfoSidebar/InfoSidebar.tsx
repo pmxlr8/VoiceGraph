@@ -17,117 +17,116 @@ export default function InfoSidebar() {
   const typeName = String(selectedNode.data?.type || 'Entity');
 
   return (
-    <div
-      className="h-full flex flex-col overflow-hidden"
-      style={{
-        background: 'linear-gradient(180deg, rgba(14,14,18,0.98) 0%, rgba(10,10,13,0.99) 100%)',
-        borderLeft: '1px solid rgba(255,255,255,0.06)',
-      }}
-    >
-      {/* Close */}
-      <div className="flex justify-end p-3">
+    <div className="glass-1 h-full flex flex-col overflow-hidden p-3.5">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2 mb-2" style={{ borderBottom: '1px solid rgba(180,200,230,0.25)' }}>
+        <span
+          className="text-[11px] font-semibold uppercase text-text-muted"
+          style={{ fontFamily: "'Syne', sans-serif", letterSpacing: '0.08em' }}
+        >
+          Node Detail
+        </span>
         <button
           onClick={() => selectNode(null)}
-          className="h-7 w-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/[0.05] transition-colors"
+          className="h-6 w-6 rounded-md flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
 
+      {/* Entity name */}
+      <h2
+        className="text-[20px] font-semibold text-text-primary leading-tight mb-1.5"
+        style={{ fontFamily: "'Syne', sans-serif", letterSpacing: '-0.03em' }}
+      >
+        {selectedNode.label}
+      </h2>
+
       {/* Type badge */}
-      <div className="px-5 pb-2">
+      <div
+        className="glass-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md w-fit mb-3"
+        style={{ background: `${typeColor}22` }}
+      >
         <span
-          className="text-[11px] font-semibold uppercase tracking-[0.12em]"
-          style={{ color: typeColor }}
-        >
-          {typeName} Entity
+          className="h-[7px] w-[7px] rounded-full"
+          style={{ backgroundColor: typeColor, border: '1.5px solid rgba(110,120,140,0.45)' }}
+        />
+        <span className="text-[10.5px] font-medium text-text-primary" style={{ letterSpacing: '0.02em' }}>
+          {typeName}
         </span>
       </div>
 
-      {/* Entity name */}
-      <div className="px-5 pb-5 flex items-center gap-3">
-        <span
-          className="h-3 w-3 rounded-full shrink-0"
-          style={{ backgroundColor: typeColor }}
-        />
-        <h2 className="text-[20px] font-semibold text-text-primary leading-tight">
-          {selectedNode.label}
-        </h2>
-      </div>
-
-      <div className="mx-5 border-t border-border" />
-
-      {/* Properties */}
+      {/* Properties as description */}
       {selectedNode.data && Object.keys(selectedNode.data).filter(k => k !== 'type').length > 0 && (
-        <>
-          <div className="px-5 pt-4 pb-2">
-            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-text-muted">
-              Properties
-            </span>
-          </div>
-          <div className="px-5 space-y-2 pb-4">
-            {Object.entries(selectedNode.data)
-              .filter(([key]) => key !== 'type')
-              .map(([key, val]) => (
-                <div key={key}>
-                  <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-text-muted mb-0.5">
-                    {key}
-                  </div>
-                  <div className="text-[13px] text-text-primary leading-relaxed">
-                    {String(val)}
-                  </div>
+        <div className="mb-3">
+          {Object.entries(selectedNode.data)
+            .filter(([key]) => key !== 'type')
+            .slice(0, 3)
+            .map(([key, val]) => (
+              <div key={key} className="mb-2">
+                <div className="text-[10px] font-medium uppercase text-text-muted mb-0.5" style={{ letterSpacing: '0.04em' }}>
+                  {key}
                 </div>
-              ))}
-          </div>
-          <div className="mx-5 border-t border-border" />
-        </>
+                <div className="text-[12px] text-text-primary leading-relaxed">
+                  {String(val).length > 200 ? String(val).slice(0, 200) + '...' : String(val)}
+                </div>
+              </div>
+            ))}
+        </div>
       )}
 
-      {/* Relationships */}
-      <div className="px-5 pt-4 pb-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-text-muted">
-          Relationships
+      {/* Connections section */}
+      <div className="flex items-center justify-between pb-2 mb-2" style={{ borderBottom: '1px solid rgba(180,200,230,0.25)' }}>
+        <span
+          className="text-[11px] font-semibold uppercase text-text-muted"
+          style={{ fontFamily: "'Syne', sans-serif", letterSpacing: '0.08em' }}
+        >
+          Connections
+        </span>
+        <span className="text-[10px] text-text-muted" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+          {connectedEdges.length}
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      {/* Connections list */}
+      <div className="flex-1 overflow-y-auto space-y-1.5">
         {connectedEdges.length > 0 ? (
-          <div className="space-y-1">
-            {connectedEdges.map((edge) => {
-              const isSource = edge.source === selectedNodeId;
-              const otherNodeId = isSource ? edge.target : edge.source;
-              const otherNode = nodes.find((n) => n.id === otherNodeId);
-              const otherType = otherNode?.data?.type as string | undefined;
-              const otherColor = colorForType(otherType);
-              return (
-                <button
-                  key={edge.id}
-                  onClick={() => selectNode(otherNodeId)}
-                  className="flex w-full items-start gap-2.5 py-3 text-left transition-all hover:bg-white/[0.02] rounded-lg px-2 -mx-2 border-b border-border-subtle"
+          connectedEdges.map((edge) => {
+            const isSource = edge.source === selectedNodeId;
+            const otherNodeId = isSource ? edge.target : edge.source;
+            const otherNode = nodes.find((n) => n.id === otherNodeId);
+            const otherType = otherNode?.data?.type as string | undefined;
+            const otherColor = colorForType(otherType);
+            return (
+              <button
+                key={edge.id}
+                onClick={() => selectNode(otherNodeId)}
+                className="glass-3 flex w-full items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-white/30"
+              >
+                <span
+                  className="h-[9px] w-[9px] rounded-full shrink-0"
+                  style={{ backgroundColor: otherColor, border: '1.5px solid rgba(110,120,140,0.45)' }}
+                />
+                <span className="text-[12px] text-text-primary flex-1 truncate">
+                  {otherNode?.label ?? otherNodeId}
+                </span>
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    color: 'rgba(80,100,140,0.40)',
+                    background: 'rgba(200,215,240,0.3)',
+                  }}
                 >
-                  <span className="text-text-muted text-[12px] mt-0.5 shrink-0">
-                    {isSource ? '\u2192' : '\u2190'}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14px] text-text-primary font-medium truncate">
-                      {otherNode?.label ?? otherNodeId}
-                    </div>
-                    <div className="text-[11px] text-text-muted mt-0.5">
-                      {edge.label}
-                    </div>
-                  </div>
-                  <span
-                    className="h-[6px] w-[6px] rounded-full shrink-0 mt-2"
-                    style={{ backgroundColor: otherColor }}
-                  />
-                </button>
-              );
-            })}
-          </div>
+                  {edge.label}
+                </span>
+              </button>
+            );
+          })
         ) : (
-          <div className="text-[12px] text-text-muted py-4">No relationships found</div>
+          <div className="text-[12px] text-text-muted py-4">No connections found</div>
         )}
       </div>
     </div>

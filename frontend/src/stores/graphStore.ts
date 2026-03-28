@@ -24,30 +24,53 @@ export interface ReagraphEdge {
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  Person: '#60a5fa',
-  Organization: '#a78bfa',
-  Concept: '#34d399',
-  Event: '#fbbf24',
-  Location: '#fb7185',
-  Technology: '#2dd4bf',
-  Field: '#818cf8',
-  Method: '#fb923c',
-  Model: '#f472b6',
-  Architecture: '#38bdf8',
-  Theory: '#c084fc',
-  Year: '#94a3b8',
-  Date: '#94a3b8',
-  City: '#fb7185',
-  Country: '#f472b6',
-  Award: '#fbbf24',
-  Equation: '#2dd4bf',
-  Field_Of_Study: '#818cf8',
-  FieldOfStudy: '#818cf8',
-  Scientific_Concept: '#34d399',
-  ScientificConcept: '#34d399',
+  // Core entity types — pastel palette
+  Person: '#f096b8',       // dusty rose
+  Organization: '#96e0b8', // mint
+  Concept: '#96b8f0',      // cornflower
+  Event: '#f0aa96',        // peach
+  Location: '#aae096',     // sage green
+  Technology: '#aa96f0',   // violet
+  Facility: '#96dce8',     // pale cyan
+  Infrastructure: '#96c0f0', // sky steel
+  Signal: '#e8d496',       // golden
+  Institution: '#d496f0',  // lilac
+  Regulation: '#edc4f7',   // lilac-light
+  Community: '#96e8dc',    // turquoise
+  Commodity: '#f0cc96',    // warm sand
+  Company: '#96e0b8',      // mint (same as Org)
+  Cluster: '#c896f0',      // soft lavender
+
+  // Aliases
+  Field: '#96b8f0',
+  Method: '#f0aa96',
+  Model: '#c896f0',
+  Architecture: '#96c0f0',
+  Theory: '#d496f0',
+  Year: '#96c0f0',
+  Date: '#96c0f0',
+  City: '#aae096',
+  Country: '#aae096',
+  Award: '#e8d496',
+  Equation: '#96dce8',
+  Field_Of_Study: '#96b8f0',
+  FieldOfStudy: '#96b8f0',
+  Scientific_Concept: '#96b8f0',
+  ScientificConcept: '#96b8f0',
+
+  // DC & Energy specific
+  data_center: '#96dce8',
+  hedge_fund: '#f096b8',
+  passive: '#e8d496',
+  active: '#f0aa96',
+  transmission: '#96c0f0',
+  power_plant: '#f09696',
+  fuel_cell: '#96e8dc',
+  mining_facility: '#f0cc96',
+  thermal_energy_network: '#96e0b8',
 };
 
-const DEFAULT_COLOR = '#8b5cf6';
+const DEFAULT_COLOR = '#aa96f0';
 
 export function colorForType(type?: string): string {
   return (type && TYPE_COLORS[type]) || DEFAULT_COLOR;
