@@ -35,6 +35,8 @@ export interface CSVAnalysisResult {
 export type ClientEvent =
   | { type: 'audio_chunk'; data: string }
   | { type: 'text_input'; text: string }
+  | { type: 'start_voice' }
+  | { type: 'stop_voice' }
   | { type: 'ingest_file'; file: string; name: string; mimeType: string }
   | { type: 'ingest_url'; url: string }
   | { type: 'graph_action'; action: 'expand' | 'collapse' | 'pin'; nodeId: string };
@@ -115,11 +117,19 @@ export interface ThinkingClearEvent {
 // Status events
 export interface IngestionStatusEvent {
   type: 'ingestion_status';
-  phase: 'A' | 'B' | 'C' | 'done';
-  details: string;
+  job_id?: string;
+  phase?: string;
+  status?: string;
+  detail?: string;
+  details?: string;
   progress: number;
   entities_found?: number;
   relationships_found?: number;
+  latest_entity?: string;
+  latest_type?: string;
+  chunk?: number;
+  total_chunks?: number;
+  error?: string;
 }
 
 export interface OntologyChangedEvent {

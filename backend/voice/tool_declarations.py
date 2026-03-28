@@ -94,9 +94,11 @@ VOICE_TOOLS = [
     types.FunctionDeclaration(
         name="highlight_nodes",
         description=(
-            "Highlight specific nodes and edges in the graph visualization. "
+            "Highlight specific nodes in the graph visualization. "
             "Non-highlighted nodes dim to 20% opacity. Call this after queries "
-            "to visually show relevant parts of the graph."
+            "to visually show relevant parts of the graph. "
+            "You can pass entity NAMES (like 'Donald Trump') and they will "
+            "be resolved to the correct graph nodes automatically."
         ),
         parameters=types.Schema(
             type="OBJECT",
@@ -104,12 +106,12 @@ VOICE_TOOLS = [
                 "node_ids": types.Schema(
                     type="ARRAY",
                     items=types.Schema(type="STRING"),
-                    description="List of node IDs to highlight",
+                    description="List of node IDs OR entity names to highlight",
                 ),
                 "edge_ids": types.Schema(
                     type="ARRAY",
                     items=types.Schema(type="STRING"),
-                    description="List of edge IDs to highlight",
+                    description="List of edge IDs to highlight (optional)",
                 ),
             },
             required=["node_ids"],
@@ -138,6 +140,49 @@ VOICE_TOOLS = [
                 ),
             },
             required=["name", "entity_type"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="add_relationship",
+        description=(
+            "Add a new relationship/edge between two existing entities in the "
+            "knowledge graph. Use when the user says things like "
+            "'Connect Einstein to Physics' or 'Link Google to AI'."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "source_name": types.Schema(
+                    type="STRING",
+                    description="Name of the source entity",
+                ),
+                "target_name": types.Schema(
+                    type="STRING",
+                    description="Name of the target entity",
+                ),
+                "relationship_type": types.Schema(
+                    type="STRING",
+                    description="Type of relationship (e.g. WORKS_AT, DEVELOPED, RELATED_TO)",
+                ),
+            },
+            required=["source_name", "target_name", "relationship_type"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="remove_node",
+        description=(
+            "Remove an entity and all its relationships from the knowledge graph. "
+            "Use when the user says 'Delete X' or 'Remove X from the graph'."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "name": types.Schema(
+                    type="STRING",
+                    description="Name of the entity to remove",
+                ),
+            },
+            required=["name"],
         ),
     ),
 ]

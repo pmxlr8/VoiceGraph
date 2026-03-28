@@ -269,7 +269,8 @@ class ExtractionPipeline:
         """
         await self._emit("phase_a_start", {"status": "Discovering entities..."})
 
-        chunks = chunk_text(text, chunk_size=1000, overlap=200)
+        # Use larger chunks for speed — fewer API calls
+        chunks = chunk_text(text, chunk_size=3000, overlap=200)
         if not chunks:
             chunks = [text] if text else []
 
@@ -282,8 +283,10 @@ class ExtractionPipeline:
 
         for i, chunk in enumerate(chunks):
             await self._emit("phase_a_progress", {
-                "status": f"Processing chunk {i + 1}/{len(chunks)}...",
+                "status": f"Analyzing chunk {i + 1}/{len(chunks)}...",
                 "progress": (i + 1) / len(chunks),
+                "chunk": i + 1,
+                "total_chunks": len(chunks),
             })
 
             if use_mock:
@@ -352,6 +355,54 @@ TEXT:
             "relationships": all_relationships,
             "discovered_types": discovered_types,
         }
+
+    # ------------------------------------------------------------------
+    # Fast write — skip Phase B/C, write Phase A results directly
+    # ------------------------------------------------------------------
+
+    async def _write_phase_a_results(self, discovery: dict[str, Any]) -> dict[str, Any]:
+        """Write Phase A discovery results directly to Neo4j, skipping ontology."""
+        await self._emit("phase_c_start", {"status": "Writing to graph..."})
+
+        entities = discovery["entities"]
+        relationships = discovery["relationships"]
+
+        # Deduplicate
+        seen: dict[str, dict[str, Any]] = {}
+        for e in entities:
+            name = e.get("name", "")
+            if name and name not in seen:
+                seen[name] = e
+        unique_entities = list(seen.values())
+
+        nodes_created = 0
+        edges_created = 0
+
+        if self._neo4j is not None:
+            try:
+                nodes_created = await self._write_nodes(unique_entities)
+                # Signal frontend to refresh graph after nodes are written
+                await self._emit("graph_refresh", {"reason": "nodes_written", "count": nodes_created})
+                edges_created = await self._write_edges(relationships)
+                # Signal again after edges
+                await self._emit("graph_refresh", {"reason": "edges_written", "count": edges_created})
+            except Exception as exc:
+                logger.error("Failed to write to Neo4j: %s", exc)
+
+        stats = {
+            "nodes_created": nodes_created,
+            "edges_created": edges_created,
+            "total_entities": len(unique_entities),
+            "total_relationships": len(relationships),
+            "chunks_processed": 1,
+        }
+
+        await self._emit("phase_c_complete", {
+            "status": f"Done: {len(unique_entities)} entities, {len(relationships)} relationships",
+            **stats,
+        })
+
+        return stats
 
     # ------------------------------------------------------------------
     # Phase B -- Ontology Generation
@@ -773,17 +824,11 @@ TEXT:
                     "phase_c": None,
                 }
 
-            # Phase A -- Schema-Free Discovery
+            # Single-phase fast extraction — extract and write directly
             discovery = await self.run_phase_a(text)
 
-            # Phase B -- Ontology Generation
-            ontology = await self.run_phase_b(
-                discovery["discovered_types"],
-                text[:2000],
-            )
-
-            # Phase C -- Precision Extraction
-            results = await self.run_phase_c(text, ontology)
+            # Skip Phase B/C for speed — write Phase A results directly to Neo4j
+            results = await self._write_phase_a_results(discovery)
 
             elapsed = time.time() - start_time
             summary = {
@@ -792,11 +837,7 @@ TEXT:
                     "relationships_discovered": len(discovery["relationships"]),
                     "types_discovered": discovery["discovered_types"],
                 },
-                "phase_b": {
-                    "ontology_json": ontology.to_json(),
-                    "graph_schema": ontology.to_graph_schema(),
-                    "validation": ontology.validate(),
-                },
+                "phase_b": None,
                 "phase_c": results,
                 "elapsed_seconds": round(elapsed, 2),
             }

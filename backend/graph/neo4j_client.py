@@ -276,7 +276,7 @@ class Neo4jClient:
 
         cypher = (
             "MATCH (n) "
-            "WHERE n.name =~ '(?i).*' + $name + '.*' "
+            "WHERE toLower(n.name) CONTAINS toLower($name) "
             "RETURN elementId(n) AS id, n.name AS name, labels(n) AS labels, "
             "properties(n) AS properties "
             "LIMIT 25"
@@ -295,8 +295,8 @@ class Neo4jClient:
 
         cypher = (
             "MATCH (a), (b) "
-            "WHERE a.name =~ '(?i).*' + $from_name + '.*' "
-            "AND b.name =~ '(?i).*' + $to_name + '.*' "
+            "WHERE toLower(a.name) CONTAINS toLower($from_name) "
+            "AND toLower(b.name) CONTAINS toLower($to_name) "
             "WITH a, b LIMIT 1 "
             f"MATCH path = shortestPath((a)-[*1..{max_hops}]-(b)) "
             "RETURN [n IN nodes(path) | "
@@ -324,7 +324,7 @@ class Neo4jClient:
             return self._sample_neighborhood(name, depth)
 
         cypher = (
-            "MATCH (start) WHERE start.name =~ '(?i).*' + $name + '.*' "
+            "MATCH (start) WHERE toLower(start.name) CONTAINS toLower($name) "
             "WITH start LIMIT 1 "
             f"MATCH path = (start)-[*1..{depth}]-(connected) "
             "WITH start, connected, relationships(path) AS rels "

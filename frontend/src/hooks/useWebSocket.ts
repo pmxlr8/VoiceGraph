@@ -4,7 +4,8 @@ import { useGraphStore } from '../stores/graphStore';
 import { useIngestionStore } from '../stores/ingestionStore';
 import type { ClientEvent, ServerEvent } from '../types/events';
 
-const WS_URL = `ws://${window.location.host}/ws/voice`;
+const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${WS_PROTOCOL}//${window.location.host}/ws/voice`;
 const RECONNECT_BASE_MS = 1000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
@@ -17,6 +18,7 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
 
   const setConnected = useVoiceStore((s) => s.setConnected);
   const addTranscript = useVoiceStore((s) => s.addTranscript);
+  const addActivity = useVoiceStore((s) => s.addActivity);
 
   const graphStore = useGraphStore;
   const ingestionStore = useIngestionStore;
@@ -31,6 +33,9 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
           // ---- Transcript ----
           case 'transcript':
             addTranscript(data.role, data.text);
+            if (data.role === 'agent') {
+              state.setLastAgentResponse(data.text);
+            }
             break;
 
           // ---- Graph mutations ----
@@ -50,17 +55,15 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
             state.removeNode(data.nodeId);
             break;
 
-          // ---- Highlight ----
-          // (custom highlight event from backend, not in the ServerEvent union
-          //  but handled gracefully)
-
           // ---- Thinking animations ----
           case 'thinking_start':
             state.thinkingStart(data.query);
+            addActivity('thinking', data.query, { icon: '🧠' });
             break;
 
           case 'thinking_step':
             state.thinkingAddStep(data.step, data.icon, data.nodeId);
+            addActivity('thinking', data.step, { icon: data.icon || '🔍' });
             break;
 
           case 'thinking_traverse':
@@ -87,36 +90,82 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
           // ---- Status events ----
           case 'ingestion_status': {
             const ingState = ingestionStore.getState();
-            const phaseMap: Record<string, string> = { A: 'Discovery', B: 'Ontology', C: 'Extraction', done: 'Complete' };
-            const phaseName = phaseMap[data.phase] ?? data.phase;
-            if (data.phase === 'done') {
-              ingState.setComplete();
+            if (data.status === 'complete') {
+              ingState.setComplete(data.entities_found, data.relationships_found);
+            } else if (data.status === 'error') {
+              ingState.setError(data.error || 'Unknown error');
             } else {
-              ingState.updateProgress(
-                phaseName,
-                data.progress,
-                data.entities_found ?? ingState.entitiesFound,
-                data.relationships_found ?? ingState.relationshipsFound,
-              );
+              ingState.updateProgress({
+                phase: data.phase || data.status,
+                detail: data.detail || '',
+                progress: typeof data.progress === 'number' ? data.progress * 100 : undefined,
+                entities: data.entities_found,
+                relationships: data.relationships_found,
+                latestEntity: data.latest_entity,
+                latestType: data.latest_type,
+                chunk: data.chunk,
+                totalChunks: data.total_chunks,
+                status: data.status,
+              });
             }
             break;
           }
           case 'ontology_changed':
           case 'csv_analysis':
-            // TODO: handle in respective stores
             break;
 
           case 'error':
             console.error('[WS] Server error:', data.message);
+            addActivity('system', `Error: ${data.message}`);
             break;
 
           default: {
-            // Handle events not in the strict ServerEvent union (e.g. highlight)
             const untyped = data as Record<string, unknown>;
             if (untyped.type === 'highlight') {
-              const nodeIds = (untyped.nodeIds as string[]) || [];
+              const rawNodeIds = (untyped.nodeIds as string[]) || [];
               const edgeIds = (untyped.edgeIds as string[]) || [];
-              state.setHighlight(nodeIds, edgeIds);
+              // Resolve: try matching by ID first, then by label/name (case-insensitive)
+              const storeNodeList = state.nodes;
+              const storeIdSet = new Set(storeNodeList.map((n) => n.id));
+              const resolvedIds: string[] = [];
+              for (const nid of rawNodeIds) {
+                if (storeIdSet.has(nid)) {
+                  resolvedIds.push(nid);
+                } else {
+                  // Try matching by label (entity name)
+                  const lower = nid.toLowerCase();
+                  const matched = storeNodeList.filter(
+                    (n) => n.label.toLowerCase().includes(lower) || lower.includes(n.label.toLowerCase())
+                  );
+                  for (const m of matched) resolvedIds.push(m.id);
+                }
+              }
+              console.log('[Highlight] raw:', rawNodeIds, 'resolved:', resolvedIds, 'storeNodes:', storeNodeList.length);
+              state.setHighlight(resolvedIds, edgeIds);
+            } else if (untyped.type === 'voice_ready') {
+              addActivity('system', 'Voice session connected');
+            } else if (untyped.type === 'voice_stopped') {
+              addActivity('system', 'Voice session ended');
+            } else if (untyped.type === 'tool_call_start') {
+              // Store tool name so we can update it when result comes
+              (window as any).__lastToolActivityId = `act-${(window as any).__nextActId || 0}`;
+              addActivity('tool_start', `${untyped.tool_name}`, {
+                toolName: untyped.tool_name as string,
+                toolArgs: JSON.stringify(untyped.args || {}),
+                status: 'running',
+              });
+            } else if (untyped.type === 'tool_call_result') {
+              // Update the running tool_start entry to done
+              const voiceState = useVoiceStore.getState();
+              const runningTool = voiceState.activity.findLast(
+                (a: any) => a.type === 'tool_start' && a.status === 'running'
+              );
+              if (runningTool) {
+                voiceState.updateActivity(runningTool.id, { status: 'done' });
+              }
+              addActivity('tool_result', untyped.summary as string || 'Done');
+            } else if (untyped.type === 'turn_complete') {
+              // Voice turn complete — don't log
             } else {
               console.warn('[WS] Unknown event type:', untyped.type);
             }
@@ -126,12 +175,18 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
         console.error('[WS] Failed to parse message:', err);
       }
     },
-    [addTranscript, graphStore, ingestionStore],
+    [addTranscript, addActivity, graphStore, ingestionStore],
   );
 
   const sendEvent = useCallback((event: ClientEvent) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(event));
+      // Log user actions to activity
+      if (event.type === 'text_input') {
+        // transcript will be logged via addTranscript
+      } else if (event.type === 'start_voice') {
+        useVoiceStore.getState().addActivity('system', 'Starting voice session...');
+      }
     } else {
       console.warn('[WS] Cannot send, not connected');
     }
@@ -143,7 +198,6 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-      console.log('[WS] Connected');
       setConnected(true);
       reconnectAttempts.current = 0;
     };
@@ -151,26 +205,19 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
     ws.onmessage = handleMessage;
 
     ws.onclose = () => {
-      console.log('[WS] Disconnected');
       setConnected(false);
       wsRef.current = null;
 
-      // Auto-reconnect with exponential backoff
       if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
         const delay = RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current);
-        console.log(`[WS] Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts.current + 1})`);
         reconnectTimer.current = setTimeout(() => {
           reconnectAttempts.current++;
           connect();
         }, delay);
-      } else {
-        console.error('[WS] Max reconnect attempts reached');
       }
     };
 
-    ws.onerror = (err) => {
-      console.error('[WS] Error:', err);
-    };
+    ws.onerror = () => {};
 
     wsRef.current = ws;
   }, [handleMessage, setConnected]);
@@ -180,17 +227,13 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
     }
-    reconnectAttempts.current = MAX_RECONNECT_ATTEMPTS; // prevent auto-reconnect
+    reconnectAttempts.current = MAX_RECONNECT_ATTEMPTS;
     wsRef.current?.close();
   }, []);
 
   useEffect(() => {
     connect();
-
-    // Expose sendEvent globally for console testing
-    // Usage: window.sendEvent({type:'text_input', text:'hello'})
     (window as unknown as Record<string, unknown>).sendEvent = sendEvent;
-
     return () => {
       disconnect();
       delete (window as unknown as Record<string, unknown>).sendEvent;

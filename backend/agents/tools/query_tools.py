@@ -22,24 +22,27 @@ logger = logging.getLogger(__name__)
 CYPHER_TEMPLATES = {
     "search_concepts": """
         MATCH (n)
-        WHERE n.name =~ '(?i).*{query}.*'
+        WHERE toLower(n.name) CONTAINS toLower('{query}')
         RETURN n.name AS name, labels(n) AS types,
                n.description AS description, elementId(n) AS id
         LIMIT {top_k}
     """,
     "explore_entity": """
         MATCH (n)-[r]-(m)
-        WHERE n.name =~ '(?i).*{entity_name}.*'
-        RETURN n.name AS source, type(r) AS rel_type,
-               m.name AS target, labels(m) AS target_types,
+        WHERE toLower(n.name) CONTAINS toLower('{entity_name}')
+        RETURN n.name AS source, n.description AS source_desc,
+               labels(n) AS source_types,
+               type(r) AS rel_type,
+               m.name AS target, m.description AS target_desc,
+               labels(m) AS target_types,
                elementId(n) AS source_id, elementId(m) AS target_id,
                elementId(r) AS edge_id
         LIMIT 50
     """,
     "find_path": """
         MATCH (a), (b)
-        WHERE a.name =~ '(?i).*{entity_a}.*'
-          AND b.name =~ '(?i).*{entity_b}.*'
+        WHERE toLower(a.name) CONTAINS toLower('{entity_a}')
+          AND toLower(b.name) CONTAINS toLower('{entity_b}')
         MATCH path = shortestPath((a)-[*1..{max_hops}]-(b))
         RETURN path
     """,
@@ -72,7 +75,7 @@ CYPHER_TEMPLATES = {
 # ---------------------------------------------------------------------------
 
 
-def _run_cypher(template_key: str, params: dict[str, Any] | None = None,
+async def _run_cypher(template_key: str, params: dict[str, Any] | None = None,
                 raw_cypher: str | None = None) -> list[dict]:
     """Execute a Cypher query via the shared Neo4j client.
 
@@ -88,7 +91,7 @@ def _run_cypher(template_key: str, params: dict[str, Any] | None = None,
             cypher = cypher.replace("{" + key + "}", str(value))
 
     try:
-        return client.run_query(cypher)
+        return await client.execute_query(cypher)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Cypher execution failed: %s", exc)
         return []
@@ -99,13 +102,13 @@ def _run_cypher(template_key: str, params: dict[str, Any] | None = None,
 # ---------------------------------------------------------------------------
 
 
-def search_concepts(query: str, top_k: int = 10) -> dict:
+async def search_concepts(query: str, top_k: int = 10) -> dict:
     """Semantic search across all entities in the knowledge graph.
     Uses vector embeddings to find conceptually similar entities.
     Returns matching entities with similarity scores.
     Use when: user asks about a topic broadly, e.g. 'What do we know about climate change?'"""
 
-    results = _run_cypher("search_concepts", {"query": query, "top_k": top_k})
+    results = await _run_cypher("search_concepts", {"query": query, "top_k": top_k})
 
     if results:
         return {
@@ -128,34 +131,51 @@ def search_concepts(query: str, top_k: int = 10) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def explore_entity(entity_name: str, depth: int = 2) -> dict:
+async def explore_entity(entity_name: str, depth: int = 2) -> dict:
     """Get the full neighborhood of an entity — all connected nodes
     and relationships up to N hops away.
     Use when: user asks about a specific entity by name,
     e.g. 'Tell me about OpenAI' or 'What is connected to Node X?'"""
 
-    results = _run_cypher("explore_entity", {"entity_name": entity_name})
+    results = await _run_cypher("explore_entity", {"entity_name": entity_name})
 
     if results:
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
+        connections_summary: list[str] = []
         for rec in results:
             src_id = rec.get("source_id", "")
             tgt_id = rec.get("target_id", "")
-            nodes[src_id] = {"id": src_id, "name": rec.get("source", "")}
+            nodes[src_id] = {
+                "id": src_id,
+                "name": rec.get("source", ""),
+                "description": rec.get("source_desc", ""),
+                "types": rec.get("source_types", []),
+            }
             nodes[tgt_id] = {
                 "id": tgt_id,
                 "name": rec.get("target", ""),
+                "description": rec.get("target_desc", ""),
                 "types": rec.get("target_types", []),
             }
+            rel = rec.get("rel_type", "")
+            target_name = rec.get("target", "")
             edges.append({
                 "id": rec.get("edge_id", ""),
                 "source": src_id,
                 "target": tgt_id,
-                "type": rec.get("rel_type", ""),
+                "type": rel,
             })
+            connections_summary.append(f"{rel} → {target_name}")
+
+        # Build a human-readable summary for the agent
+        main_node = next((n for n in nodes.values() if n["name"].lower() == entity_name.lower()), None)
+        desc = main_node.get("description", "") if main_node else ""
+
         return {
             "entity": entity_name,
+            "description": desc or "No description available.",
+            "connections": connections_summary[:10],
             "nodes": list(nodes.values()),
             "edges": edges,
             "node_count": len(nodes),
@@ -177,14 +197,14 @@ def explore_entity(entity_name: str, depth: int = 2) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def find_path(entity_a: str, entity_b: str, max_hops: int = 5) -> dict:
+async def find_path(entity_a: str, entity_b: str, max_hops: int = 5) -> dict:
     """Find the shortest path between two entities in the graph.
     Shows how two concepts are connected through intermediate entities.
     Returns the full path with all nodes and relationships.
     Use when: user asks how two things relate,
     e.g. 'How does Elon Musk connect to SpaceX?'"""
 
-    results = _run_cypher("find_path", {
+    results = await _run_cypher("find_path", {
         "entity_a": entity_a,
         "entity_b": entity_b,
         "max_hops": max_hops,
@@ -237,7 +257,7 @@ def query_graph(question: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def deep_search(query: str, top_k: int = 5) -> dict:
+async def deep_search(query: str, top_k: int = 5) -> dict:
     """Deep search combining semantic similarity with graph traversal.
     First finds relevant entities via search, then expands their graph
     neighborhoods for rich context. Best for questions that need both
@@ -246,7 +266,7 @@ def deep_search(query: str, top_k: int = 5) -> dict:
     e.g. 'Explain the landscape of AI regulation'"""
 
     # Step 1: Find anchor entities
-    search_results = search_concepts(query, top_k=top_k)
+    search_results = await search_concepts(query, top_k=top_k)
     anchors = search_results.get("results", [])
 
     if not anchors:
@@ -262,7 +282,7 @@ def deep_search(query: str, top_k: int = 5) -> dict:
     for anchor in anchors:
         name = anchor.get("name", "")
         if name:
-            neighborhood = explore_entity(name, depth=1)
+            neighborhood = await explore_entity(name, depth=1)
             expanded.append({
                 "anchor": name,
                 "neighborhood": neighborhood,
@@ -282,7 +302,7 @@ def deep_search(query: str, top_k: int = 5) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def get_communities() -> dict:
+async def get_communities() -> dict:
     """Get high-level thematic summaries of the knowledge graph.
     Uses community detection to identify clusters of related entities
     and provides summaries of each community.
@@ -290,7 +310,7 @@ def get_communities() -> dict:
     e.g. 'What are the main themes in this data?'"""
 
     # For now: return entity type distribution as a proxy for communities
-    type_results = _run_cypher("entity_types")
+    type_results = await _run_cypher("entity_types")
 
     if type_results:
         return {
@@ -318,7 +338,7 @@ def get_communities() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def get_ontology_info() -> dict:
+async def get_ontology_info() -> dict:
     """Get the current ontology structure — all entity types, relationship
     types, their hierarchy, and domain/range constraints.
     Use when: user asks what types of data are in the graph,
@@ -335,8 +355,8 @@ def get_ontology_info() -> dict:
             logger.warning("Failed to read ontology: %s", exc)
 
     # Fallback: query Neo4j for schema info
-    types = _run_cypher("entity_types")
-    rels = _run_cypher("relationship_types")
+    types = await _run_cypher("entity_types")
+    rels = await _run_cypher("relationship_types")
 
     return {
         "entity_types": types or [],
@@ -350,29 +370,32 @@ def get_ontology_info() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def get_graph_stats() -> dict:
+async def get_graph_stats() -> dict:
     """Get statistics about the knowledge graph — number of nodes, edges,
     entity type distribution, most connected entities.
     Use when: user asks about graph size or structure,
     e.g. 'How big is the graph?' or 'What are the most connected nodes?'"""
 
-    counts = _run_cypher("graph_counts")
-    types = _run_cypher("entity_types")
-    top_nodes = _run_cypher("most_connected")
-
-    if counts:
-        rec = counts[0] if counts else {}
+    # Single fast query for counts
+    counts = await _run_cypher("graph_counts")
+    if not counts:
         return {
-            "node_count": rec.get("node_count", 0),
-            "edge_count": rec.get("edge_count", 0),
-            "entity_types": types,
-            "most_connected": top_nodes[:10] if top_nodes else [],
+            "node_count": 0,
+            "edge_count": 0,
+            "entity_types": [],
+            "most_connected": [],
+            "message": "Neo4j not connected. No statistics available.",
         }
 
+    rec = counts[0]
+    # Run types and top nodes in parallel for speed
+    types_task = _run_cypher("entity_types")
+    top_task = _run_cypher("most_connected")
+    entity_types, top_nodes = await asyncio.gather(types_task, top_task)
+
     return {
-        "node_count": 0,
-        "edge_count": 0,
-        "entity_types": [],
-        "most_connected": [],
-        "message": "Neo4j not connected. No statistics available.",
+        "node_count": rec.get("node_count", 0),
+        "edge_count": rec.get("edge_count", 0),
+        "entity_types": entity_types,
+        "most_connected": top_nodes[:10] if top_nodes else [],
     }

@@ -28,17 +28,26 @@ const TYPE_COLORS: Record<string, string> = {
   Organization: '#a78bfa',
   Concept: '#34d399',
   Event: '#fbbf24',
-  Location: '#f87171',
+  Location: '#fb7185',
   Technology: '#2dd4bf',
   Field: '#818cf8',
   Method: '#fb923c',
   Model: '#f472b6',
   Architecture: '#38bdf8',
   Theory: '#c084fc',
-  Date: '#a1a1aa',
+  Year: '#94a3b8',
+  Date: '#94a3b8',
+  City: '#fb7185',
+  Country: '#f472b6',
+  Award: '#fbbf24',
+  Equation: '#2dd4bf',
+  Field_Of_Study: '#818cf8',
+  FieldOfStudy: '#818cf8',
+  Scientific_Concept: '#34d399',
+  ScientificConcept: '#34d399',
 };
 
-const DEFAULT_COLOR = '#71717a';
+const DEFAULT_COLOR = '#8b5cf6';
 
 export function colorForType(type?: string): string {
   return (type && TYPE_COLORS[type]) || DEFAULT_COLOR;
@@ -78,6 +87,9 @@ interface GraphState {
   thinkingQuery: string;
   thinkingSteps: ThinkingStep[];
 
+  // Latest agent text response (from transcript events)
+  lastAgentResponse: string;
+
   // ---- Actions: selection ----
   selectNode: (id: string | null) => void;
 
@@ -97,6 +109,10 @@ interface GraphState {
   setActiveEdges: (ids: Set<string>) => void;
   setDimAll: (dim: boolean) => void;
 
+  // ---- Actions: type filters ----
+  typeFilters: Set<string>;
+  toggleTypeFilter: (type: string) => void;
+
   // ---- Actions: thinking ----
   thinkingStart: (query: string) => void;
   thinkingAddStep: (step: string, icon: string, nodeId?: string) => void;
@@ -104,6 +120,7 @@ interface GraphState {
   thinkingRipple: (centerId: string, rings: string[][]) => void;
   thinkingComplete: (resultNodeIds: string[], resultEdgeIds: string[]) => void;
   thinkingClear: () => void;
+  setLastAgentResponse: (text: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +163,25 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   isThinking: false,
   thinkingQuery: '',
   thinkingSteps: [],
+  lastAgentResponse: '',
+  typeFilters: new Set<string>(),
+
+  // ---- Type filters ----
+  toggleTypeFilter: (type) => {
+    if (type === '__all__') {
+      set({ typeFilters: new Set<string>() });
+      return;
+    }
+    set((state) => {
+      const next = new Set(state.typeFilters);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return { typeFilters: next };
+    });
+  },
 
   // ---- Selection ----
 
@@ -164,6 +200,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set({
       nodes: nodes.map(toReagraphNode),
       edges: edges.map(toReagraphEdge),
+      activeNodeIds: new Set<string>(),
+      activeEdgeIds: new Set<string>(),
+      dimAll: false,
+      isThinking: false,
     }),
 
   setNodes: (nodes) => set({ nodes: nodes.map(toReagraphNode) }),
@@ -171,14 +211,41 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   setEdges: (edges) => set({ edges: edges.map(toReagraphEdge) }),
 
   addNode: (node) =>
-    set((state) => ({
-      nodes: [...state.nodes, toReagraphNode(node)],
-    })),
+    set((state) => {
+      const rNode = toReagraphNode(node);
+      // Deduplicate by label (case-insensitive)
+      const exists = state.nodes.some(
+        (n) => n.label.toLowerCase() === rNode.label.toLowerCase(),
+      );
+      if (exists) return state;
+      // Auto-highlight the new node for 3 seconds
+      const newActive = new Set(state.activeNodeIds);
+      newActive.add(rNode.id);
+      setTimeout(() => {
+        const s = get();
+        const updated = new Set(s.activeNodeIds);
+        updated.delete(rNode.id);
+        if (updated.size === 0) {
+          set({ activeNodeIds: updated, dimAll: false });
+        } else {
+          set({ activeNodeIds: updated });
+        }
+      }, 3000);
+      return {
+        nodes: [...state.nodes, rNode],
+        activeNodeIds: newActive,
+        dimAll: true,
+      };
+    }),
 
   addEdge: (edge) =>
-    set((state) => ({
-      edges: [...state.edges, toReagraphEdge(edge)],
-    })),
+    set((state) => {
+      const rEdge = toReagraphEdge(edge);
+      // Deduplicate
+      const exists = state.edges.some((e) => e.id === rEdge.id);
+      if (exists) return state;
+      return { edges: [...state.edges, rEdge] };
+    }),
 
   removeNode: (nodeId) =>
     set((state) => ({
@@ -200,12 +267,26 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   // ---- Highlighting ----
 
-  setHighlight: (nodeIds, edgeIds) =>
+  setHighlight: (nodeIds, edgeIds) => {
     set({
       activeNodeIds: new Set(nodeIds),
       activeEdgeIds: new Set(edgeIds),
-      dimAll: true,
-    }),
+      dimAll: nodeIds.length > 0,
+    });
+    // Auto-clear highlights after 8 seconds
+    if (nodeIds.length > 0) {
+      setTimeout(() => {
+        const s = get();
+        if (!s.isThinking && s.dimAll) {
+          set({
+            activeNodeIds: new Set<string>(),
+            activeEdgeIds: new Set<string>(),
+            dimAll: false,
+          });
+        }
+      }, 8000);
+    }
+  },
 
   clearHighlights: () =>
     set({
@@ -220,11 +301,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   // ---- Thinking ----
 
+  setLastAgentResponse: (text) => set({ lastAgentResponse: text }),
+
   thinkingStart: (query) =>
     set({
       isThinking: true,
       thinkingQuery: query,
       thinkingSteps: [],
+      lastAgentResponse: '',
       activeNodeIds: new Set<string>(),
       activeEdgeIds: new Set<string>(),
       dimAll: true,
@@ -266,13 +350,28 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       return { activeNodeIds: newNodes };
     }),
 
-  thinkingComplete: (resultNodeIds, resultEdgeIds) =>
+  thinkingComplete: (resultNodeIds, resultEdgeIds) => {
     set({
       isThinking: false,
       activeNodeIds: new Set(resultNodeIds),
       activeEdgeIds: new Set(resultEdgeIds),
-      dimAll: true,
-    }),
+      dimAll: resultNodeIds.length > 0,
+    });
+    // Auto-clear highlights after 8 seconds
+    if (resultNodeIds.length > 0) {
+      setTimeout(() => {
+        const s = get();
+        // Only clear if still showing the same result set
+        if (!s.isThinking && s.dimAll) {
+          set({
+            activeNodeIds: new Set<string>(),
+            activeEdgeIds: new Set<string>(),
+            dimAll: false,
+          });
+        }
+      }, 8000);
+    }
+  },
 
   thinkingClear: () =>
     set({

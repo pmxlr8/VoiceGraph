@@ -3,13 +3,16 @@
 import asyncio
 import json
 import logging
-import random
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from api.routes import router as graph_router
 from graph.neo4j_client import Neo4jClient
@@ -138,6 +141,10 @@ async def send_initial_graph(ws: WebSocket, app: FastAPI) -> None:
     else:
         nodes = SAMPLE_NODES
         edges = SAMPLE_EDGES
+    # If Neo4j is connected but empty, use sample data so the graph isn't blank
+    if not nodes:
+        nodes = SAMPLE_NODES
+        edges = SAMPLE_EDGES
     await send_event(ws, {
         "type": "graph_update",
         "nodes": nodes,
@@ -146,134 +153,249 @@ async def send_initial_graph(ws: WebSocket, app: FastAPI) -> None:
 
 
 async def handle_text_input(ws: WebSocket, event: dict[str, Any]) -> None:
-    """Handle a text_input event: echo transcript + simulate thinking + highlight."""
-    text = event.get("text", "")
+    """Handle a text_input event: run real query tools against Neo4j."""
+    from agents.tools.query_tools import (
+        search_concepts, explore_entity, find_path,
+        get_graph_stats, deep_search, get_communities, get_ontology_info,
+    )
+    from agents.tools.graph_tools import highlight_nodes, add_node, add_relationship, remove_node
 
-    # Get current graph from Neo4j client (includes ingested nodes)
-    client = getattr(app.state, "neo4j_client", None)
-    if client is not None:
-        graph = await client.get_full_graph()
-        all_nodes = [_normalize_node(n) for n in graph["nodes"]]
-        all_edges = [_normalize_edge(e) for e in graph["edges"]]
-    else:
-        all_nodes = SAMPLE_NODES
-        all_edges = SAMPLE_EDGES
+    text = event.get("text", "").strip()
+    if not text:
+        return
 
-    if not all_nodes:
-        all_nodes = SAMPLE_NODES
-        all_edges = SAMPLE_EDGES
+    # Echo user transcript
+    await send_event(ws, {"type": "transcript", "role": "user", "text": text})
 
-    # Send transcript echo
-    await send_event(ws, {
-        "type": "transcript",
-        "role": "user",
-        "text": text,
-    })
+    # Thinking start
+    await send_event(ws, {"type": "thinking_start", "query": text})
 
-    # --- Phase 1: Thinking starts, graph dims ---
-    await send_event(ws, {
-        "type": "thinking_start",
-        "query": text,
-    })
-    await asyncio.sleep(0.6)
+    text_lower = text.lower()
 
-    # --- Phase 2: Search — visit nodes one by one with deliberate pacing ---
-    num_to_visit = min(6, len(all_nodes))
-    visited_nodes = random.sample(all_nodes, num_to_visit)
+    try:
+        # Route to the right tool based on query intent
+        result_nodes: list[str] = []
+        result_edges: list[str] = []
+        response_text = ""
 
-    thinking_steps = [
-        ("Analyzing query structure...", "🧠", None),
-        (f"Searching {len(all_nodes)} entities...", "🔍", None),
-    ]
+        # ---- Mutation: add node ----
+        if text_lower.startswith(("add ", "create ")) and " as " in text_lower:
+            # Pattern: "add Einstein as Person" or "create Quantum Computing as Concept"
+            parts = text.split(" as ", 1)
+            name = parts[0]
+            for prefix in ["add ", "create "]:
+                if name.lower().startswith(prefix):
+                    name = name[len(prefix):]
+            name = name.strip().strip('"\'')
+            entity_type = parts[1].strip().strip('"\'.')
+            await send_event(ws, {"type": "thinking_step", "step": f"Adding {name} as {entity_type}...", "icon": "➕"})
+            result = await add_node(name=name, entity_type=entity_type)
+            node_id = result.get("node_id", "")
+            if node_id:
+                result_nodes = [node_id]
+            response_text = result.get("message", f"Added {name}.")
 
-    for step_text, icon, node_id in thinking_steps:
-        await asyncio.sleep(0.8)
+        # ---- Mutation: add relationship ----
+        elif text_lower.startswith(("connect ", "link ", "relate ")) or (" connects to " in text_lower) or (" link to " in text_lower):
+            # Pattern: "connect Einstein to Physics as CONTRIBUTED_TO"
+            # or "connect Einstein to Physics" (defaults to RELATED_TO)
+            cleaned = text
+            for prefix in ["connect ", "link ", "relate "]:
+                if cleaned.lower().startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+            # Split on " to "
+            rel_type = "RELATED_TO"
+            if " as " in cleaned:
+                cleaned, rel_type = cleaned.rsplit(" as ", 1)
+                rel_type = rel_type.strip().strip('"\'.')
+            parts = cleaned.split(" to ", 1)
+            if len(parts) == 2:
+                source = parts[0].strip().strip('"\'')
+                target = parts[1].strip().strip('"\'.')
+                await send_event(ws, {"type": "thinking_step", "step": f"Connecting {source} → {target}...", "icon": "🔗"})
+                result = await add_relationship(source_name=source, target_name=target, relationship_type=rel_type)
+                response_text = result.get("message", f"Connected {source} to {target}.")
+            else:
+                response_text = "To connect entities, use: 'connect [entity A] to [entity B]'"
+
+        # ---- Mutation: remove/delete node ----
+        elif text_lower.startswith(("delete ", "remove ")):
+            name = text
+            for prefix in ["delete ", "remove "]:
+                if name.lower().startswith(prefix):
+                    name = name[len(prefix):]
+            name = name.strip().strip('"\'.')
+            await send_event(ws, {"type": "thinking_step", "step": f"Removing {name}...", "icon": "🗑"})
+            result = await remove_node(name=name)
+            response_text = result.get("message", f"Removed {name}.")
+
+        # ---- Query: stats ----
+        elif any(w in text_lower for w in ["stat", "how many", "how big", "overview", "size"]):
+            await send_event(ws, {"type": "thinking_step", "step": "Fetching graph statistics...", "icon": "📊"})
+            stats = await get_graph_stats()
+            nc = stats.get("node_count", 0)
+            ec = stats.get("edge_count", 0)
+            top = stats.get("most_connected", [])[:5]
+            top_names = [t.get("name", "?") for t in top]
+            response_text = (
+                f"The graph has {nc} entities and {ec} relationships. "
+                f"Most connected: {', '.join(top_names)}." if top_names
+                else f"The graph has {nc} entities and {ec} relationships."
+            )
+
+        elif any(w in text_lower for w in ["connect", "path", "between", "link"]):
+            # Try to extract two entity names from the query
+            # Simple heuristic: look for quoted names or split on "and"/"to"
+            parts = None
+            for sep in [" and ", " to ", " with "]:
+                if sep in text_lower:
+                    parts = text.split(sep, 1) if sep in text else text_lower.split(sep, 1)
+                    break
+            if parts and len(parts) == 2:
+                a, b = parts[0].strip().strip('"\''), parts[1].strip().strip('"\'?.')
+                # Clean common prefixes and suffixes
+                for prefix in ["how does ", "how do ", "how is ", "find path ", "path between ",
+                               "connection between ", "what connects ", "what links "]:
+                    if a.lower().startswith(prefix):
+                        a = a[len(prefix):]
+                # Clean trailing verbs from entity A (e.g. "Einstein connect" -> "Einstein")
+                for suffix in [" connect", " link", " relate", " path"]:
+                    if a.lower().endswith(suffix):
+                        a = a[:len(a) - len(suffix)]
+                a = a.strip()
+                b = b.strip()
+                await send_event(ws, {"type": "thinking_step", "step": f"Finding path: {a} → {b}...", "icon": "🔗"})
+                path_result = await find_path(a, b)
+                if path_result.get("found"):
+                    response_text = f"Found a path connecting '{a}' to '{b}' through {len(path_result.get('path', []))} steps."
+                else:
+                    response_text = f"No direct path found between '{a}' and '{b}'. They may not be connected in the graph."
+            else:
+                await send_event(ws, {"type": "thinking_step", "step": "Searching...", "icon": "🔍"})
+                sr = await search_concepts(text, top_k=10)
+                results = sr.get("results", [])
+                result_nodes = [r.get("id", "") for r in results if r.get("id")]
+                names = [r.get("name", "") for r in results[:5]]
+                response_text = f"Found {len(results)} related entities: {', '.join(names)}." if names else "No matching entities found."
+
+        elif any(w in text_lower for w in ["theme", "communit", "cluster", "main topic"]):
+            await send_event(ws, {"type": "thinking_step", "step": "Analyzing communities...", "icon": "🏘"})
+            comm = await get_communities()
+            communities = comm.get("communities", [])[:5]
+            desc = "; ".join(f"{c.get('theme', '?')} ({c.get('entity_count', 0)} entities)" for c in communities)
+            response_text = f"Main themes: {desc}." if desc else "No community data available."
+
+        elif any(w in text_lower for w in ["ontology", "types", "schema", "what kind"]):
+            await send_event(ws, {"type": "thinking_step", "step": "Loading ontology...", "icon": "📋"})
+            onto = await get_ontology_info()
+            if "ontology" in onto:
+                response_text = "Ontology loaded. I can see the entity types and relationship types defined in the schema."
+            else:
+                types_list = onto.get("entity_types", [])
+                type_names = [", ".join(t.get("types", [])) for t in types_list[:8]]
+                response_text = f"Entity types in the graph: {', '.join(type_names)}." if type_names else "No ontology data available."
+
+        elif any(w in text_lower for w in ["tell me about", "what is", "who is", "explore", "detail", "show me"]):
+            # Entity exploration — extract the entity name
+            entity = text
+            for prefix in ["tell me about ", "what is ", "who is ", "explore ", "show me ", "details on ", "detail "]:
+                if text_lower.startswith(prefix):
+                    entity = text[len(prefix):].strip().strip('"\'?.')
+                    break
+            await send_event(ws, {"type": "thinking_step", "step": f"Exploring: {entity}...", "icon": "🔎"})
+            exp = await explore_entity(entity)
+            nodes = exp.get("nodes", [])
+            edges = exp.get("edges", [])
+            result_nodes = [n.get("id", "") for n in nodes if n.get("id")]
+            result_edges = [e.get("id", "") for e in edges if e.get("id")]
+            if nodes:
+                # Build rich response with relationship context
+                conn_names = [n.get("name", "") for n in nodes
+                              if n.get("name", "").lower() != entity.lower()][:6]
+                rel_types = list({e.get("type", "") for e in edges if e.get("type")})[:4]
+                parts = [f"{entity} has {len(nodes)} connections"]
+                if conn_names:
+                    parts.append(f"Connected to: {', '.join(conn_names)}")
+                if rel_types:
+                    parts.append(f"Relationships: {', '.join(rel_types)}")
+                response_text = ". ".join(parts) + "."
+            else:
+                response_text = f"No data found for '{entity}'. Try a different search term."
+
+        else:
+            # Default: search then auto-explore top result
+            await send_event(ws, {"type": "thinking_step", "step": f"Searching for: {text}...", "icon": "🔍"})
+            sr = await search_concepts(text, top_k=10)
+            results = sr.get("results", [])
+
+            # Deduplicate by case-insensitive name
+            seen_names: set[str] = set()
+            deduped: list[dict] = []
+            for r in results:
+                name_lower = r.get("name", "").lower()
+                if name_lower not in seen_names:
+                    seen_names.add(name_lower)
+                    deduped.append(r)
+            results = deduped
+
+            result_nodes = [r.get("id", "") for r in results if r.get("id")]
+            if results:
+                # Auto-explore the best match for richer response
+                best = results[0]
+                best_name = best.get("name", "")
+                best_types = best.get("types", [])
+                best_type = best_types[0] if best_types else "Entity"
+                best_desc = best.get("description", "")
+
+                await send_event(ws, {"type": "thinking_step", "step": f"Exploring: {best_name}...", "icon": "🔎"})
+                exp = await explore_entity(best_name)
+                neighbors = exp.get("nodes", [])
+                edges = exp.get("edges", [])
+                if neighbors:
+                    result_nodes = [n.get("id", "") for n in neighbors if n.get("id")]
+                    result_edges = [e.get("id", "") for e in edges if e.get("id")]
+
+                # Build a rich response
+                parts = [f"{best_name} ({best_type})"]
+                if best_desc:
+                    parts.append(best_desc)
+                if neighbors:
+                    conn_names = [n.get("name", "") for n in neighbors if n.get("name", "").lower() != best_name.lower()][:5]
+                    if conn_names:
+                        parts.append(f"Connected to: {', '.join(conn_names)}")
+                if len(results) > 1:
+                    other_names = [r.get("name", "") for r in results[1:4]]
+                    parts.append(f"Also found: {', '.join(other_names)}")
+                response_text = ". ".join(parts) + "."
+            else:
+                response_text = f"No results found for '{text}'. Try a different search term or ingest more data."
+
+        # Highlight result nodes on graph
+        if result_nodes:
+            highlight_nodes(node_ids=result_nodes, edge_ids=result_edges)
+
+        # Thinking complete
         await send_event(ws, {
-            "type": "thinking_step",
-            "step": step_text,
-            "icon": icon,
-            "nodeId": node_id,
+            "type": "thinking_complete",
+            "resultNodeIds": result_nodes,
+            "resultEdgeIds": result_edges,
         })
 
-    # Visit each node with a dramatic pause
-    for i, node in enumerate(visited_nodes):
-        await asyncio.sleep(0.7)
-        verbs = ["Examining", "Inspecting", "Evaluating", "Analyzing", "Scanning", "Checking"]
+        # Agent response
         await send_event(ws, {
-            "type": "thinking_step",
-            "step": f"{verbs[i % len(verbs)]}: {node['label']}",
-            "icon": "👁" if i < len(visited_nodes) - 1 else "✅",
-            "nodeId": node["id"],
+            "type": "transcript",
+            "role": "agent",
+            "text": response_text,
         })
 
-    # --- Phase 3: Traverse edges connecting visited nodes ---
-    visited_ids = {n["id"] for n in visited_nodes}
-    relevant_edges = [
-        e for e in all_edges
-        if e["source"] in visited_ids and e["target"] in visited_ids
-    ]
-    # Also include edges where at least one end is visited
-    if len(relevant_edges) < 3:
-        relevant_edges = [
-            e for e in all_edges
-            if e["source"] in visited_ids or e["target"] in visited_ids
-        ]
-
-    await asyncio.sleep(0.5)
-    await send_event(ws, {
-        "type": "thinking_step",
-        "step": f"Tracing {min(4, len(relevant_edges))} connections...",
-        "icon": "🔗",
-        "nodeId": None,
-    })
-
-    for edge in relevant_edges[:4]:
-        await asyncio.sleep(0.6)
+    except Exception as exc:
+        logger.exception("Query failed: %s", exc)
+        await send_event(ws, {"type": "thinking_complete", "resultNodeIds": [], "resultEdgeIds": []})
         await send_event(ws, {
-            "type": "thinking_traverse",
-            "fromId": edge["source"],
-            "toId": edge["target"],
-            "edgeId": edge["id"],
-            "delay_ms": 500,
+            "type": "transcript",
+            "role": "agent",
+            "text": f"Sorry, I encountered an error processing your query: {exc}",
         })
-
-    # --- Phase 4: Ripple effect from a central result node ---
-    if visited_nodes:
-        center = random.choice(visited_nodes)
-        # Find 1-hop neighbors
-        neighbor_ids = set()
-        for e in all_edges:
-            if e["source"] == center["id"]:
-                neighbor_ids.add(e["target"])
-            elif e["target"] == center["id"]:
-                neighbor_ids.add(e["source"])
-
-        if neighbor_ids:
-            await asyncio.sleep(0.5)
-            await send_event(ws, {
-                "type": "thinking_ripple",
-                "centerId": center["id"],
-                "rings": [list(neighbor_ids)[:6]],
-            })
-
-    # --- Phase 5: Complete — hold the result highlight ---
-    await asyncio.sleep(0.8)
-    result_node_ids = list(visited_ids)
-    result_edge_ids = [e["id"] for e in relevant_edges[:4]]
-
-    await send_event(ws, {
-        "type": "thinking_complete",
-        "resultNodeIds": result_node_ids,
-        "resultEdgeIds": result_edge_ids,
-    })
-
-    # Agent response
-    labels = [n["label"] for n in visited_nodes[:4]]
-    await send_event(ws, {
-        "type": "transcript",
-        "role": "agent",
-        "text": f"I found {len(result_node_ids)} relevant concepts related to \"{text}\": {', '.join(labels)}.",
-    })
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +469,26 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
+# Static frontend (production — served from built frontend in /app/static)
+# ---------------------------------------------------------------------------
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="static-assets")
+
+    # SPA fallback — serve index.html for all non-API/WS routes
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Check if the file exists in static dir
+        file_path = STATIC_DIR / full_path
+        if full_path and file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+# ---------------------------------------------------------------------------
 # WebSocket endpoint — voice interaction channel
 # ---------------------------------------------------------------------------
 
@@ -395,13 +537,22 @@ async def voice_ws(websocket: WebSocket):
                     await handle_text_input(websocket, event)
 
             elif event_type == "start_voice":
-                # Create and start a new voice session
-                if websocket in voice_sessions and voice_sessions[websocket].active:
+                # Reuse existing session if still alive, otherwise create new
+                existing = voice_sessions.get(websocket)
+                if existing and existing.active:
+                    # Session already running — just confirm
                     await send_event(websocket, {
-                        "type": "error",
-                        "message": "Voice session already active.",
+                        "type": "voice_ready",
+                        "message": "Voice session active.",
                     })
                 else:
+                    # Clean up dead session if any
+                    if existing:
+                        try:
+                            await existing.close()
+                        except Exception:
+                            pass
+
                     async def _make_sender(ws: WebSocket):
                         async def _send(evt: dict[str, Any]) -> None:
                             await send_event(ws, evt)
@@ -413,14 +564,12 @@ async def voice_ws(websocket: WebSocket):
                     await session.start()
 
             elif event_type == "stop_voice":
-                # Close the active voice session
-                voice_session = voice_sessions.pop(websocket, None)
-                if voice_session:
-                    await voice_session.close()
-                    await send_event(websocket, {
-                        "type": "voice_stopped",
-                        "message": "Voice session ended.",
-                    })
+                # DON'T destroy the session — just acknowledge
+                # The session stays alive for continuous conversation
+                await send_event(websocket, {
+                    "type": "voice_stopped",
+                    "message": "Mic paused. Session still active.",
+                })
 
             elif event_type == "audio_chunk":
                 # Forward audio to the active voice session

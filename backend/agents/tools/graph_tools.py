@@ -42,12 +42,12 @@ def _broadcast(event: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_cypher(cypher: str) -> list[dict]:
+async def _run_cypher(cypher: str) -> list[dict]:
     client = ctx.neo4j_client
     if client is None:
         return []
     try:
-        return client.run_query(cypher)
+        return await client.execute_query(cypher)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Cypher execution failed: %s", exc)
         return []
@@ -58,21 +58,44 @@ def _run_cypher(cypher: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def highlight_nodes(node_ids: list[str], edge_ids: list[str] = []) -> dict:
+async def highlight_nodes(node_ids: list[str], edge_ids: list[str] = []) -> dict:
     """Highlight specific nodes and edges in the graph visualization.
     Non-highlighted nodes dim to 20% opacity. Always call this after
-    a query to visually show the user which parts of the graph are relevant."""
+    a query to visually show the user which parts of the graph are relevant.
+    Accepts either Neo4j element IDs or entity names — names are resolved automatically."""
+
+    resolved_ids = []
+    client = ctx.neo4j_client
+
+    for nid in node_ids:
+        # If it looks like a Neo4j element ID (contains ':'), use as-is
+        if ':' in nid:
+            resolved_ids.append(nid)
+        elif client is not None:
+            # Resolve name to ID
+            try:
+                results = await client.execute_query(
+                    "MATCH (n) WHERE toLower(n.name) CONTAINS toLower($name) "
+                    "RETURN elementId(n) AS id LIMIT 3",
+                    {"name": nid},
+                )
+                for r in results:
+                    resolved_ids.append(r["id"])
+            except Exception:
+                pass
+        if not resolved_ids:
+            resolved_ids.append(nid)  # fallback
 
     _broadcast({
         "type": "highlight",
-        "node_ids": node_ids,
-        "edge_ids": edge_ids,
+        "nodeIds": resolved_ids + node_ids,  # Send both resolved IDs and original names
+        "edgeIds": edge_ids,
     })
 
     return {
-        "highlighted_nodes": len(node_ids),
+        "highlighted_nodes": len(resolved_ids),
         "highlighted_edges": len(edge_ids),
-        "message": f"Highlighted {len(node_ids)} nodes and {len(edge_ids)} edges.",
+        "message": f"Highlighted {len(resolved_ids)} nodes and {len(edge_ids)} edges.",
     }
 
 
@@ -119,7 +142,7 @@ def dim_nodes() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def add_node(name: str, entity_type: str, description: str = "") -> dict:
+async def add_node(name: str, entity_type: str, description: str = "") -> dict:
     """Add a new entity to the knowledge graph and display it in the
     visualization. Creates the node in Neo4j and notifies the frontend."""
 
@@ -132,19 +155,19 @@ def add_node(name: str, entity_type: str, description: str = "") -> dict:
                 f"CREATE (n:`{entity_type}` {{name: $name, description: $desc}}) "
                 f"RETURN elementId(n) AS id"
             )
-            results = client.run_query(cypher, {"name": name, "desc": description})
+            results = await client.execute_query(cypher, {"name": name, "desc": description})
             if results:
                 node_id = results[0].get("id")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to create node in Neo4j: %s", exc)
 
     _broadcast({
-        "type": "add_node",
+        "type": "node_added",
         "node": {
             "id": node_id or f"temp_{name}",
-            "name": name,
-            "entity_type": entity_type,
-            "description": description,
+            "label": name,
+            "type": entity_type,
+            "properties": {"name": name, "entity_type": entity_type, "description": description},
         },
     })
 
@@ -162,7 +185,7 @@ def add_node(name: str, entity_type: str, description: str = "") -> dict:
 # ---------------------------------------------------------------------------
 
 
-def add_relationship(source_name: str, target_name: str, relationship_type: str) -> dict:
+async def add_relationship(source_name: str, target_name: str, relationship_type: str) -> dict:
     """Add a new relationship between two existing entities in the knowledge
     graph. Connects them in Neo4j and updates the visualization."""
 
@@ -176,7 +199,7 @@ def add_relationship(source_name: str, target_name: str, relationship_type: str)
                 f"CREATE (a)-[r:`{relationship_type}`]->(b) "
                 "RETURN elementId(r) AS id"
             )
-            results = client.run_query(cypher, {
+            results = await client.execute_query(cypher, {
                 "source": source_name,
                 "target": target_name,
             })
@@ -184,12 +207,34 @@ def add_relationship(source_name: str, target_name: str, relationship_type: str)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to create relationship in Neo4j: %s", exc)
 
+    # Find actual node IDs for source and target by name
+    source_id = source_name
+    target_id = target_name
+    if client is not None:
+        try:
+            id_results = await client.execute_query(
+                "MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN elementId(n) AS id LIMIT 1",
+                {"name": source_name},
+            )
+            if id_results:
+                source_id = id_results[0]["id"]
+            id_results = await client.execute_query(
+                "MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN elementId(n) AS id LIMIT 1",
+                {"name": target_name},
+            )
+            if id_results:
+                target_id = id_results[0]["id"]
+        except Exception:
+            pass
+
     _broadcast({
-        "type": "add_edge",
+        "type": "edge_added",
         "edge": {
-            "source": source_name,
-            "target": target_name,
-            "type": relationship_type,
+            "id": f"e-{source_name}-{relationship_type}-{target_name}",
+            "source": source_id,
+            "target": target_id,
+            "label": relationship_type,
+            "properties": {},
         },
     })
 
@@ -199,4 +244,51 @@ def add_relationship(source_name: str, target_name: str, relationship_type: str)
         "relationship_type": relationship_type,
         "created_in_neo4j": created,
         "message": f"Created relationship '{source_name}' --[{relationship_type}]--> '{target_name}'.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: remove_node
+# ---------------------------------------------------------------------------
+
+
+async def remove_node(name: str) -> dict:
+    """Remove an entity from the knowledge graph by name.
+    Deletes the node and all its relationships from Neo4j and updates
+    the visualization."""
+
+    client = ctx.neo4j_client
+    deleted = False
+    node_id = None
+
+    if client is not None:
+        try:
+            # Find the node ID first
+            id_results = await client.execute_query(
+                "MATCH (n) WHERE toLower(n.name) = toLower($name) "
+                "RETURN elementId(n) AS id LIMIT 1",
+                {"name": name},
+            )
+            if id_results:
+                node_id = id_results[0]["id"]
+                # Delete the node and all its relationships
+                await client.execute_query(
+                    "MATCH (n) WHERE elementId(n) = $id DETACH DELETE n",
+                    {"id": node_id},
+                )
+                deleted = True
+        except Exception as exc:
+            logger.warning("Failed to delete node in Neo4j: %s", exc)
+
+    if node_id:
+        _broadcast({
+            "type": "node_removed",
+            "nodeId": node_id,
+        })
+
+    return {
+        "name": name,
+        "node_id": node_id,
+        "deleted_from_neo4j": deleted,
+        "message": f"Deleted entity '{name}'." if deleted else f"Entity '{name}' not found.",
     }

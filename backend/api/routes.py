@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
@@ -185,6 +187,20 @@ async def merge_node(body: MergeNodeRequest, request: Request):
     if "name" not in body.properties:
         raise HTTPException(status_code=422, detail="properties must include 'name'")
     node_id = await client.merge_node(body.label, body.properties)
+
+    # Broadcast to all WebSocket clients
+    broadcast_fn = _get_broadcast_fn(request)
+    if broadcast_fn:
+        await broadcast_fn({
+            "type": "node_added",
+            "node": {
+                "id": node_id,
+                "label": body.properties.get("name", ""),
+                "type": body.label,
+                "properties": body.properties,
+            },
+        })
+
     return {"id": node_id, "status": "merged"}
 
 
@@ -195,6 +211,21 @@ async def merge_relationship(body: MergeRelationshipRequest, request: Request):
     rel_id = await client.merge_relationship(
         body.from_id, body.to_id, body.rel_type, body.properties
     )
+
+    # Broadcast to all WebSocket clients
+    broadcast_fn = _get_broadcast_fn(request)
+    if broadcast_fn:
+        await broadcast_fn({
+            "type": "edge_added",
+            "edge": {
+                "id": rel_id,
+                "source": body.from_id,
+                "target": body.to_id,
+                "label": body.rel_type,
+                "properties": body.properties,
+            },
+        })
+
     return {"id": rel_id, "status": "merged"}
 
 
@@ -312,3 +343,77 @@ async def get_ingest_status(job_id: str, request: Request):
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return job.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Test / Demo endpoints
+# ---------------------------------------------------------------------------
+
+_DEMO_TYPES = ["Person", "Organization", "Concept", "Event", "Location",
+               "Technology", "Theory", "Field", "Method", "Award"]
+_DEMO_RELS = ["related_to", "works_at", "developed", "located_in", "part_of",
+              "influenced", "collaborated_with", "studied", "founded", "won"]
+_DEMO_NAMES = {
+    "Person": ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Hank",
+               "Ivy", "Jack", "Karen", "Leo", "Mona", "Nick", "Olivia", "Paul",
+               "Quinn", "Rita", "Sam", "Tina", "Uma", "Vic", "Wendy", "Xander"],
+    "Organization": ["MIT", "Google", "NASA", "CERN", "OpenAI", "Stanford", "DeepMind",
+                     "SpaceX", "Apple", "Meta", "Microsoft", "Amazon", "Tesla", "IBM"],
+    "Concept": ["Entropy", "Consciousness", "Emergence", "Symmetry", "Causality",
+                "Complexity", "Abstraction", "Recursion", "Duality", "Resonance"],
+    "Event": ["Big Bang", "Renaissance", "Industrial Revolution", "Moon Landing",
+              "World War II", "French Revolution", "Cold War", "Digital Revolution"],
+    "Location": ["New York", "London", "Tokyo", "Paris", "Berlin", "Mumbai", "Sydney",
+                 "Toronto", "Seoul", "Beijing", "Singapore", "Dubai", "Moscow", "Rome"],
+    "Technology": ["Neural Networks", "Blockchain", "Quantum Computing", "CRISPR",
+                   "5G", "Fusion Energy", "AR/VR", "Robotics", "IoT", "Edge Computing"],
+    "Theory": ["Relativity", "Quantum Mechanics", "Evolution", "Game Theory",
+               "Information Theory", "Chaos Theory", "String Theory", "Set Theory"],
+    "Field": ["Physics", "Biology", "Computer Science", "Mathematics", "Philosophy",
+              "Economics", "Neuroscience", "Chemistry", "Linguistics", "Psychology"],
+    "Method": ["Gradient Descent", "Monte Carlo", "Bayesian Inference", "PCA",
+               "Fourier Transform", "A* Search", "Dynamic Programming", "Backpropagation"],
+    "Award": ["Nobel Prize", "Turing Award", "Fields Medal", "Wolf Prize",
+              "Breakthrough Prize", "Abel Prize", "Pulitzer Prize", "Grammy"],
+}
+
+
+@router.get("/test/generate")
+async def generate_test_graph(n: int = 500):
+    """Generate a synthetic graph with n nodes for stress testing.
+
+    Usage: GET /api/test/generate?n=1000
+    Returns the graph directly (does NOT write to Neo4j).
+    Load it on the frontend by calling setGraph() with the result.
+    """
+    nodes = []
+    for i in range(n):
+        t = random.choice(_DEMO_TYPES)
+        names = _DEMO_NAMES[t]
+        base_name = random.choice(names)
+        name = f"{base_name} {i}" if i >= len(names) else base_name
+        nodes.append({
+            "id": f"test-{i}",
+            "label": name,
+            "type": t,
+            "properties": {"name": name, "entity_type": t},
+        })
+
+    # Create edges: ~2.5x nodes for a rich graph
+    edge_count = int(n * 2.5)
+    edges = []
+    for j in range(edge_count):
+        src = random.randint(0, n - 1)
+        tgt = random.randint(0, n - 1)
+        if src == tgt:
+            tgt = (tgt + 1) % n
+        edges.append({
+            "id": f"test-e-{j}",
+            "source": f"test-{src}",
+            "target": f"test-{tgt}",
+            "label": random.choice(_DEMO_RELS),
+            "type": random.choice(_DEMO_RELS),
+            "properties": {},
+        })
+
+    return {"nodes": nodes, "edges": edges, "count": {"nodes": len(nodes), "edges": len(edges)}}

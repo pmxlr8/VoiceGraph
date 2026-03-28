@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import os
 from typing import Any, Callable, Coroutine
@@ -21,79 +20,67 @@ from voice.tool_executor import execute_tool
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# System instruction for Gemini Live
-# ---------------------------------------------------------------------------
+# Model that supports Live/bidi with audio + tools
+LIVE_MODEL = "gemini-2.5-flash-native-audio-latest"
 
-SYSTEM_INSTRUCTION = """You are VoiceGraph, an AI assistant that helps users explore their knowledge graph through voice conversation.
+SYSTEM_INSTRUCTION = """You are VoiceGraph, a voice assistant for exploring a knowledge graph.
 
-BEHAVIORS:
-- Keep responses SHORT and conversational -- you are speaking aloud, not writing essays
-- Use the tools to search, explore, and highlight the graph as the user asks questions
-- Narrate what you are doing as you search: "Let me search for that..." or "I found 5 entities..."
-- When highlighting nodes, briefly explain why those nodes are relevant
-- If a search returns no results, suggest alternative queries or offer to add new entities
-- Be enthusiastic but concise about discoveries in the graph
-- When exploring connections, describe the path in plain language
-- Offer follow-up suggestions: "Would you like me to explore any of these further?"
+RULES:
+- Call tools IMMEDIATELY. Don't explain what you plan to do — just do it.
+- NEVER narrate your reasoning or planning process. Just act and report results.
+- After searches and explore_entity, ALWAYS call highlight_nodes with the entity NAMES you found.
+- For simple commands (add, delete, stats), be brief — 1-2 sentences.
+- For explore/search results, give RICH detail: describe the entity, list its connections and relationship types, mention interesting patterns. 3-5 sentences is fine for rich queries.
 
-TOOL USAGE:
-- After any search or exploration, call highlight_nodes to visually show results
-- Use search_concepts for broad topic queries
-- Use explore_entity when the user names a specific entity
-- Use find_path when the user asks how two things connect
-- Use get_graph_stats when asked about graph size or overview
-- Use add_node when the user wants to create new entities
+TOOLS:
+- search_concepts: broad topic search → then highlight results
+- explore_entity: specific entity lookup → then highlight results. DESCRIBE what you found in detail.
+- find_path: how two things connect → then highlight the path
+- get_graph_stats: graph size overview
+- add_node: create entity (name + type)
+- add_relationship: connect two entities
+- remove_node: delete entity
+- highlight_nodes: light up nodes on the graph. Pass entity NAMES like ["Albert Einstein", "Physics"].
 
-VOICE STYLE:
-- Speak naturally, as if in conversation
-- Avoid bullet points or formatted text -- you are being heard, not read
-- Use short sentences
-- Pause naturally between ideas"""
+EXAMPLES OF GOOD RESPONSES:
+- "Found Albert Einstein. He's a Person connected to 5 entities: Physics through CONTRIBUTED_TO, the Nobel Prize through RECEIVED, Princeton through WORKED_AT, Relativity through DEVELOPED, and Quantum Mechanics through PIONEERED. He's one of the most connected nodes in the graph."
+- "The graph has 237 entities and 241 relationships. The most connected nodes are Google with 15 connections, AI with 12, and Machine Learning with 9."
+- "Done, I've added Einstein as a Person."
+
+NEVER SAY things like "I've determined that..." or "My plan is to..." or "Let me..." — just DO it."""
 
 
 class VoiceSession:
-    """Manages a single Gemini Live session for one WebSocket client.
-
-    Lifecycle:
-        1. Create with VoiceSession(send_event)
-        2. Call start() to open the Gemini Live connection
-        3. Feed audio with send_audio(base64_pcm16)
-        4. Feed text with send_text(text)
-        5. Call close() when done
-
-    The session runs a background receive loop that:
-        - Streams audio responses back via send_event
-        - Streams transcript text back via send_event
-        - Handles function calls by executing tools and returning results
-    """
+    """Manages a single Gemini Live session for one WebSocket client."""
 
     def __init__(
         self,
         send_event: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
     ) -> None:
-        """Initialize the voice session.
-
-        Args:
-            send_event: Async callable that sends a JSON event dict to the
-                        WebSocket client.
-        """
         self._send_event = send_event
         self._session: Any = None
         self._client: genai.Client | None = None
         self._receive_task: asyncio.Task | None = None
         self._active = False
-        self._session_context: Any = None  # the async context manager
+        self._session_context: Any = None
+        self._tool_in_progress = False
+        # Conversation memory — survives reconnects
+        self._conversation_history: list[str] = []
+        # Transcript buffering — accumulate words before sending
+        self._user_transcript_buf = ""
+        self._agent_transcript_buf = ""
+        self._user_flush_task: asyncio.Task | None = None
+        self._agent_flush_task: asyncio.Task | None = None
 
     @property
     def active(self) -> bool:
-        """Whether the session is currently connected and running."""
         return self._active
 
     async def start(self) -> None:
         """Open a Gemini Live connection and start the receive loop."""
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
+            logger.error("GOOGLE_API_KEY not set")
             await self._send_event({
                 "type": "error",
                 "message": "GOOGLE_API_KEY not set. Voice features are unavailable.",
@@ -107,18 +94,18 @@ class VoiceSession:
                 response_modalities=["AUDIO"],
                 tools=[types.Tool(function_declarations=VOICE_TOOLS)],
                 system_instruction=SYSTEM_INSTRUCTION,
+                input_audio_transcription=types.AudioTranscriptionConfig(),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
             )
 
-            # Enter the async context manager manually so we can keep
-            # the session open across multiple send/receive cycles.
+            logger.info("Connecting to Gemini Live model: %s", LIVE_MODEL)
             self._session_context = self._client.aio.live.connect(
-                model="gemini-3.1-flash-live-preview",
+                model=LIVE_MODEL,
                 config=config,
             )
             self._session = await self._session_context.__aenter__()
             self._active = True
 
-            # Start the background receive loop
             self._receive_task = asyncio.create_task(
                 self._receive_loop(),
                 name="voice-receive-loop",
@@ -128,7 +115,7 @@ class VoiceSession:
                 "type": "voice_ready",
                 "message": "Voice session started. Listening...",
             })
-            logger.info("Gemini Live session started")
+            logger.info("Gemini Live session started successfully")
 
         except Exception as exc:
             logger.exception("Failed to start Gemini Live session")
@@ -138,42 +125,35 @@ class VoiceSession:
             })
 
     async def send_audio(self, base64_audio: str) -> None:
-        """Send a base64-encoded PCM16 audio chunk to Gemini.
-
-        Args:
-            base64_audio: Base64-encoded PCM16 audio at 16kHz.
-        """
+        """Send a base64-encoded PCM16 audio chunk to Gemini."""
         if not self._active or self._session is None:
             return
 
         try:
             audio_bytes = base64.b64decode(base64_audio)
-            await self._session.send(
-                input=types.LiveClientRealtimeInput(
-                    media_chunks=[
-                        types.Blob(
-                            data=audio_bytes,
-                            mime_type="audio/pcm;rate=16000",
-                        )
-                    ]
+            await self._session.send_realtime_input(
+                audio=types.Blob(
+                    data=audio_bytes,
+                    mime_type="audio/pcm;rate=16000",
                 )
             )
         except Exception:
-            logger.exception("Failed to send audio to Gemini")
+            # Connection closed — don't spam logs for every audio chunk
+            pass
 
     async def send_text(self, text: str) -> None:
-        """Send a text message to the Gemini Live session.
-
-        Args:
-            text: The text message to send.
-        """
+        """Send a text message to the Gemini Live session."""
         if not self._active or self._session is None:
             return
 
+        self._add_history("user", text)
         try:
-            await self._session.send(
-                input=text,
-                end_of_turn=True,
+            await self._session.send_client_content(
+                turns=[types.Content(
+                    parts=[types.Part(text=text)],
+                    role="user",
+                )],
+                turn_complete=True,
             )
         except Exception:
             logger.exception("Failed to send text to Gemini")
@@ -206,48 +186,184 @@ class VoiceSession:
     # ------------------------------------------------------------------
 
     async def _receive_loop(self) -> None:
-        """Continuously receive responses from Gemini Live and forward them."""
-        if self._session is None:
-            return
+        """Continuously receive responses from Gemini Live and forward them.
+        Auto-reconnects up to 3 times if the session drops."""
+        max_retries = 3
 
-        try:
-            async for response in self._session.receive():
+        for attempt in range(max_retries + 1):
+            if self._session is None:
+                return
+
+            try:
+                async for response in self._session.receive():
+                    if not self._active:
+                        return
+                    try:
+                        await self._handle_response(response)
+                    except Exception:
+                        logger.exception("Error handling Gemini response (continuing)")
+                # Stream ended normally (Gemini closed it)
                 if not self._active:
-                    break
-                await self._handle_response(response)
-        except asyncio.CancelledError:
-            logger.info("Receive loop cancelled")
-        except Exception:
-            logger.exception("Error in Gemini Live receive loop")
-            if self._active:
+                    return
+
+                # If a tool is in progress, wait for it to finish before reconnecting
+                if self._tool_in_progress:
+                    logger.warning("Stream ended while tool in progress — waiting...")
+                    for _ in range(150):  # Wait up to 15 seconds
+                        if not self._tool_in_progress:
+                            break
+                        await asyncio.sleep(0.1)
+
+                logger.warning("Gemini Live stream ended (attempt %d/%d)", attempt + 1, max_retries)
+
+            except asyncio.CancelledError:
+                logger.info("Receive loop cancelled")
+                return
+            except Exception:
+                logger.exception("Gemini Live receive error (attempt %d/%d)", attempt + 1, max_retries)
+
+            # Try to reconnect
+            if attempt < max_retries and self._active:
                 await self._send_event({
-                    "type": "error",
-                    "message": "Voice session disconnected unexpectedly.",
+                    "type": "voice_ready",
+                    "message": "Reconnecting voice...",
                 })
-                self._active = False
+                try:
+                    await self._reconnect()
+                    logger.info("Reconnected to Gemini Live successfully")
+                    continue
+                except Exception:
+                    logger.exception("Reconnect failed")
+
+        # All retries exhausted
+        if self._active:
+            await self._send_event({
+                "type": "error",
+                "message": "Voice session disconnected. Click mic to restart.",
+            })
+            self._active = False
+
+    async def _flush_transcript(self, role: str, delay: float) -> None:
+        """Wait for a pause in streaming, then flush the buffered transcript."""
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return  # New text arrived, timer reset
+
+        if role == "user":
+            text = self._user_transcript_buf.strip()
+            self._user_transcript_buf = ""
+        else:
+            text = self._agent_transcript_buf.strip()
+            self._agent_transcript_buf = ""
+
+        if text:
+            self._add_history(role if role == "user" else "assistant", text)
+            await self._send_event({
+                "type": "transcript",
+                "role": role,
+                "text": text,
+            })
+
+    @staticmethod
+    def _trim_tool_result(tool_name: str, result: dict) -> dict:
+        """Trim tool results to avoid overflowing Gemini's context.
+        Large results (many nodes/edges) cause Gemini 1011 internal errors."""
+        import json
+        raw = json.dumps(result, default=str)
+        if len(raw) < 4000:
+            return result
+
+        # Build a compact summary instead
+        trimmed: dict = {}
+        for key, val in result.items():
+            if isinstance(val, list) and len(val) > 5:
+                # Keep first 5 items + count
+                trimmed[key] = val[:5]
+                trimmed[f"{key}_total"] = len(val)
+            elif isinstance(val, dict) and len(json.dumps(val, default=str)) > 1000:
+                # Summarize large dicts
+                trimmed[key] = {k: v for i, (k, v) in enumerate(val.items()) if i < 10}
+            else:
+                trimmed[key] = val
+
+        trimmed["_note"] = "Results trimmed for brevity. Use highlight_nodes to show them on the graph."
+        return trimmed
+
+    def _add_history(self, role: str, text: str) -> None:
+        """Add to conversation history (keeps last 20 entries)."""
+        self._conversation_history.append(f"{role}: {text}")
+        if len(self._conversation_history) > 20:
+            self._conversation_history = self._conversation_history[-20:]
+
+    async def _reconnect(self) -> None:
+        """Re-establish the Gemini Live session with conversation context."""
+        # Close old session
+        if self._session_context is not None:
+            try:
+                await self._session_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+        # Build system instruction with conversation history
+        history_context = ""
+        if self._conversation_history:
+            history_text = "\n".join(self._conversation_history[-10:])
+            history_context = (
+                f"\n\nCONVERSATION HISTORY (continue from here, don't repeat):\n"
+                f"{history_text}\n\n"
+                f"Continue the conversation naturally. The user may refer to "
+                f"things discussed above. Do NOT re-introduce yourself."
+            )
+
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            tools=[types.Tool(function_declarations=VOICE_TOOLS)],
+            system_instruction=SYSTEM_INSTRUCTION + history_context,
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+
+        self._session_context = self._client.aio.live.connect(
+            model=LIVE_MODEL,
+            config=config,
+        )
+        self._session = await self._session_context.__aenter__()
 
     async def _handle_response(self, response: Any) -> None:
-        """Process a single response from Gemini Live.
-
-        Responses can contain:
-        - server_content: audio data and/or text
-        - tool_call: function call requests
-        """
+        """Process a single response from Gemini Live."""
         # Handle function calls
         if response.tool_call is not None:
             await self._handle_tool_call(response.tool_call)
             return
 
-        # Handle server content (audio + text)
+        # Handle server content (audio + text + transcriptions)
         server_content = response.server_content
         if server_content is None:
             return
 
+        # Input transcription — what the user said (accumulate, flush on pause)
+        if server_content.input_transcription and server_content.input_transcription.text:
+            self._user_transcript_buf += server_content.input_transcription.text
+            # Cancel previous flush timer and set a new one
+            if self._user_flush_task and not self._user_flush_task.done():
+                self._user_flush_task.cancel()
+            self._user_flush_task = asyncio.create_task(
+                self._flush_transcript("user", 0.8)
+            )
+
+        # Output transcription — what the agent said (accumulate, flush on pause)
+        if server_content.output_transcription and server_content.output_transcription.text:
+            self._agent_transcript_buf += server_content.output_transcription.text
+            if self._agent_flush_task and not self._agent_flush_task.done():
+                self._agent_flush_task.cancel()
+            self._agent_flush_task = asyncio.create_task(
+                self._flush_transcript("agent", 1.0)
+            )
+
         # Check for turn completion
         if server_content.turn_complete:
-            await self._send_event({
-                "type": "turn_complete",
-            })
+            await self._send_event({"type": "turn_complete"})
             return
 
         # Process content parts
@@ -264,29 +380,34 @@ class VoiceSession:
                         "mime_type": part.inline_data.mime_type or "audio/pcm;rate=24000",
                     })
 
-                # Text response
+                # Text thinking (model's internal text, NOT spoken output)
                 if part.text is not None and part.text.strip():
                     await self._send_event({
-                        "type": "transcript",
-                        "role": "agent",
-                        "text": part.text,
+                        "type": "thinking_step",
+                        "step": part.text.strip()[:200],
+                        "icon": "💭",
                     })
 
     async def _handle_tool_call(self, tool_call: Any) -> None:
-        """Handle a function call request from Gemini.
-
-        Executes the requested tool, sends thinking events to the frontend,
-        and returns the result to Gemini so it can continue its response.
-        """
+        """Handle tool calls from Gemini. Must respond before Gemini continues."""
+        self._tool_in_progress = True
         responses = []
 
         for fc in tool_call.function_calls:
             tool_name = fc.name
             tool_args = dict(fc.args) if fc.args else {}
+            # Capture the function call ID — required for send_tool_response
+            fc_id = getattr(fc, 'id', None)
 
-            logger.info("Gemini requested tool: %s(%s)", tool_name, tool_args)
+            logger.info("Gemini requested tool: %s(%s) id=%s", tool_name, tool_args, fc_id)
+            self._add_history("tool_call", f"{tool_name}({tool_args})")
 
-            # Send thinking events to frontend
+            await self._send_event({
+                "type": "tool_call_start",
+                "tool_name": tool_name,
+                "args": tool_args,
+            })
+
             await self._send_event({
                 "type": "thinking_start",
                 "query": f"Using {tool_name}...",
@@ -298,8 +419,23 @@ class VoiceSession:
                 "icon": "🔍",
             })
 
-            # Execute the tool
-            result = execute_tool(tool_name, tool_args)
+            try:
+                result = await asyncio.wait_for(
+                    execute_tool(tool_name, tool_args),
+                    timeout=15.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Tool %s timed out after 15s", tool_name)
+                result = {"error": f"Tool {tool_name} timed out", "partial": True}
+            except Exception as exc:
+                logger.exception("Tool %s failed", tool_name)
+                result = {"error": str(exc)}
+
+            await self._send_event({
+                "type": "tool_call_result",
+                "tool_name": tool_name,
+                "summary": f"{tool_name} returned {len(result) if isinstance(result, dict) else 0} fields",
+            })
 
             await self._send_event({
                 "type": "thinking_complete",
@@ -307,21 +443,26 @@ class VoiceSession:
                 "resultEdgeIds": [],
             })
 
-            # Build function response
-            responses.append(
-                types.FunctionResponse(
-                    name=tool_name,
-                    response=result,
-                )
-            )
+            # Trim result to avoid overflowing Gemini's context
+            trimmed = self._trim_tool_result(tool_name, result)
 
-        # Send tool results back to Gemini so it can incorporate them
+            fr = types.FunctionResponse(
+                name=tool_name,
+                response=trimmed,
+            )
+            # Attach the ID from the original function call
+            if fc_id:
+                fr.id = fc_id
+            responses.append(fr)
+
+        # Send tool results back to Gemini
+        self._tool_in_progress = False
         if responses and self._session is not None:
             try:
-                await self._session.send(
-                    input=types.LiveClientToolResponse(
-                        function_responses=responses,
-                    )
+                logger.info("Sending %d tool response(s) back to Gemini", len(responses))
+                await self._session.send_tool_response(
+                    function_responses=responses,
                 )
+                logger.info("Tool responses sent successfully")
             except Exception:
                 logger.exception("Failed to send tool responses to Gemini")
