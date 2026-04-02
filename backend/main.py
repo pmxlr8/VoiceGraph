@@ -106,10 +106,24 @@ def _normalize_node(raw: dict[str, Any]) -> dict[str, Any]:
     # Neo4j format: {id, labels: [...], properties: {name, ...}}
     labels_list = raw.get("labels", [])
     props = raw.get("properties", {})
+    node_type = labels_list[0] if labels_list else "Concept"
+    # Build a human-readable label from properties
+    label = props.get("name") or props.get("label") or props.get("title")
+    if not label:
+        # Signal nodes: use truncated snippet
+        snippet = props.get("snippet") or props.get("summary") or props.get("description")
+        if snippet:
+            label = snippet[:50] + ("..." if len(snippet) > 50 else "")
+        # Order nodes: side + order_id
+        elif props.get("order_id"):
+            side = props.get("side", "")
+            label = f"{side} {props['order_id']}".strip()
+        else:
+            label = node_type
     return {
         "id": raw["id"],
-        "label": props.get("name", raw["id"]),
-        "type": labels_list[0] if labels_list else "Concept",
+        "label": label,
+        "type": node_type,
         "properties": props,
     }
 
@@ -569,6 +583,28 @@ async def voice_ws(websocket: WebSocket):
                 await send_event(websocket, {
                     "type": "voice_stopped",
                     "message": "Mic paused. Session still active.",
+                })
+
+            elif event_type == "interrupt_voice":
+                # Interrupt: close the current session and restart fresh
+                # This is the only way to stop Gemini mid-response
+                voice_session = voice_sessions.get(websocket)
+                if voice_session and voice_session.active:
+                    logger.info("Interrupting voice session")
+                    history = list(voice_session._conversation_history)
+                    await voice_session.close()
+                    del voice_sessions[websocket]
+                    # Brief pause to let the old session fully tear down
+                    await asyncio.sleep(0.3)
+                    # Start a fresh session with conversation history preserved
+                    sender = await _make_sender(websocket)
+                    new_session = VoiceSession(send_event=sender)
+                    new_session._conversation_history = history
+                    voice_sessions[websocket] = new_session
+                    await new_session.start()
+                await send_event(websocket, {
+                    "type": "voice_interrupted",
+                    "message": "Interrupted. Listening...",
                 })
 
             elif event_type == "audio_chunk":

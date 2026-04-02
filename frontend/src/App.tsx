@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import GraphView from './components/Graph/GraphView';
 import QueryView from './components/QueryView/QueryView';
 import OntologyView from './components/OntologyView/OntologyView';
@@ -40,7 +40,7 @@ async function fetchAndLoadGraph(): Promise<number> {
 }
 
 function App() {
-  const { playChunk } = useAudioPlayback();
+  const { playChunk, stopPlayback } = useAudioPlayback();
   const { sendEvent } = useWebSocket(playChunk);
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId);
   const isThinking = useGraphStore((s) => s.isThinking);
@@ -54,6 +54,19 @@ function App() {
     sendEvent({ type: 'text_input', text: trimmed });
     setChatText('');
   }, [chatText, isThinking, sendEvent]);
+
+  const interruptCooldownRef = useRef(false);
+  const handleInterrupt = useCallback(() => {
+    if (interruptCooldownRef.current) return; // debounce — ignore rapid clicks
+    interruptCooldownRef.current = true;
+    setTimeout(() => { interruptCooldownRef.current = false; }, 2000);
+    // 1. Kill audio playback immediately (stops the voice mid-sentence)
+    stopPlayback();
+    // 2. Tell backend to close + restart the Gemini session
+    sendEvent({ type: 'interrupt_voice' });
+    // 3. Clear thinking state locally
+    useGraphStore.getState().thinkingClear();
+  }, [stopPlayback, sendEvent]);
 
   // Fetch graph on mount
   useEffect(() => {
@@ -169,6 +182,21 @@ function App() {
           </button>
           {/* Mic button */}
           <VoicePanel sendEvent={sendEvent} />
+          {/* Interrupt button — stops agent mid-speech */}
+          <button
+            onClick={handleInterrupt}
+            className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+            style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              color: '#ef4444',
+            }}
+            title="Interrupt agent"
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         {/* Agent status */}

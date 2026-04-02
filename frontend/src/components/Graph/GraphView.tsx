@@ -70,6 +70,7 @@ const wrap = (s: string, w: number) =>
 export default function GraphView() {
   const fgRef = useRef<any>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasZoomedRef = useRef(false);
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight - 56 });
 
   const storeNodes = useGraphStore((s) => s.nodes);
@@ -122,6 +123,9 @@ export default function GraphView() {
 
   // Build graph data — ONLY when actual graph data changes, NOT for highlights
   const graphData: GraphData = useMemo(() => {
+    // Reset zoom flag so next engine stop will zoom-to-fit for new data
+    hasZoomedRef.current = false;
+
     const nodes: FGNode[] = filteredNodes.map((n) => ({
       id: n.id,
       label: n.label,
@@ -155,7 +159,7 @@ export default function GraphView() {
       const type = node.type || 'Entity';
       const baseColor = colorForType(type);
       if (dimAllRef.current) {
-        return activeNodeIdsRef.current.has(node.id) ? '#4a6ab8' : baseColor + '30';
+        return activeNodeIdsRef.current.has(node.id) ? '#2563eb' : '#c8ccd8';
       }
       return baseColor;
     },
@@ -181,12 +185,13 @@ export default function GraphView() {
           const type = node.type || 'Entity';
           const baseColor = colorForType(type);
           let color = baseColor;
+          const isActive = activeNodeIds.has(node.id);
           if (dimAll) {
-            color = activeNodeIds.has(node.id) ? '#4a6ab8' : baseColor + '30';
+            color = isActive ? '#2563eb' : '#c8ccd8';
           }
           mesh.material.color.set(color);
           if (dimAll) {
-            mesh.material.opacity = activeNodeIds.has(node.id) ? 1.0 : 0.15;
+            mesh.material.opacity = isActive ? 1.0 : 0.12;
             mesh.material.transparent = true;
           } else {
             mesh.material.opacity = 0.9;
@@ -356,9 +361,12 @@ export default function GraphView() {
         warmupTicks={80}
         cooldownTicks={300}
         onEngineStop={() => {
-          // Spread nodes further apart after initial simulation
-          const fg = fgRef.current;
-          if (fg) fg.zoomToFit(400, 80);
+          // Only zoom-to-fit on first load, not on every highlight update
+          if (!hasZoomedRef.current) {
+            hasZoomedRef.current = true;
+            const fg = fgRef.current;
+            if (fg) fg.zoomToFit(400, 80);
+          }
         }}
         onLinkClick={(link: FGLink) => {
           if (fgRef.current) (fgRef.current as any).emitParticle(link);

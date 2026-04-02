@@ -146,6 +146,10 @@ export function useWebSocket(onAudioChunk?: (base64Data: string) => void) {
               addActivity('system', 'Voice session connected');
             } else if (untyped.type === 'voice_stopped') {
               addActivity('system', 'Voice session ended');
+            } else if (untyped.type === 'voice_interrupted') {
+              addActivity('system', 'Interrupted — listening...');
+              // Clear any in-progress thinking state
+              state.thinkingClear();
             } else if (untyped.type === 'tool_call_start') {
               // Store tool name so we can update it when result comes
               (window as any).__lastToolActivityId = `act-${(window as any).__nextActId || 0}`;

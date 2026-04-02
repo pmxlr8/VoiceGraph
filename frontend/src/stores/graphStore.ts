@@ -291,13 +291,33 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   // ---- Highlighting ----
 
   setHighlight: (nodeIds, edgeIds) => {
+    // Resolve: IDs may be element IDs or entity names — match both
+    const idSet = new Set(nodeIds);
+    const allNodes = get().nodes;
+    const resolved = new Set<string>();
+    for (const nid of nodeIds) {
+      // Direct ID match
+      if (allNodes.some((n) => n.id === nid)) {
+        resolved.add(nid);
+      } else {
+        // Try matching by label (case-insensitive)
+        const lower = nid.toLowerCase();
+        for (const n of allNodes) {
+          if (n.label.toLowerCase().includes(lower) || lower.includes(n.label.toLowerCase())) {
+            resolved.add(n.id);
+          }
+        }
+      }
+    }
+    // Also keep any raw IDs that didn't match by name (might match element IDs)
+    for (const nid of idSet) resolved.add(nid);
     set({
-      activeNodeIds: new Set(nodeIds),
+      activeNodeIds: resolved,
       activeEdgeIds: new Set(edgeIds),
-      dimAll: nodeIds.length > 0,
+      dimAll: resolved.size > 0,
     });
     // Auto-clear highlights after 8 seconds
-    if (nodeIds.length > 0) {
+    if (resolved.size > 0) {
       setTimeout(() => {
         const s = get();
         if (!s.isThinking && s.dimAll) {

@@ -37,6 +37,7 @@ export type ClientEvent =
   | { type: 'text_input'; text: string }
   | { type: 'start_voice' }
   | { type: 'stop_voice' }
+  | { type: 'interrupt_voice' }
   | { type: 'ingest_file'; file: string; name: string; mimeType: string }
   | { type: 'ingest_url'; url: string }
   | { type: 'graph_action'; action: 'expand' | 'collapse' | 'pin'; nodeId: string };
@@ -75,6 +76,12 @@ export interface EdgeAddedEvent {
 export interface NodeRemovedEvent {
   type: 'node_removed';
   nodeId: string;
+}
+
+export interface HighlightEvent {
+  type: 'highlight';
+  nodeIds: string[];
+  edgeIds: string[];
 }
 
 // Thinking animation events

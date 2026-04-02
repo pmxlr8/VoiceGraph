@@ -18,6 +18,44 @@ logger = logging.getLogger(__name__)
 BroadcastFn = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+def _normalize_ingest_node(n: dict[str, Any]) -> dict[str, Any]:
+    """Convert a Neo4j-style node dict to frontend GraphNode format."""
+    if "label" in n:
+        return n
+    labels_list = n.get("labels", [])
+    props = n.get("properties", {})
+    node_type = labels_list[0] if labels_list else "Concept"
+    label = props.get("name") or props.get("label") or props.get("title")
+    if not label:
+        snippet = props.get("snippet") or props.get("summary") or props.get("description")
+        if snippet:
+            label = snippet[:50] + ("..." if len(snippet) > 50 else "")
+        elif props.get("order_id"):
+            side = props.get("side", "")
+            label = f"{side} {props['order_id']}".strip()
+        else:
+            label = node_type
+    return {
+        "id": n["id"],
+        "label": label,
+        "type": node_type,
+        "properties": props,
+    }
+
+
+def _normalize_ingest_edge(e: dict[str, Any]) -> dict[str, Any]:
+    """Convert a Neo4j-style edge dict to frontend GraphEdge format."""
+    if "label" in e:
+        return e
+    return {
+        "id": e["id"],
+        "source": e["source"],
+        "target": e["target"],
+        "label": e.get("type", "related_to").lower(),
+        "properties": e.get("properties", {}),
+    }
+
+
 async def run_ingestion(
     job_id: str,
     source_type: str,
@@ -125,31 +163,8 @@ async def run_ingestion(
             if etype == "graph_refresh" and neo4j_client is not None:
                 try:
                     graph = await neo4j_client.get_full_graph()
-                    nodes = []
-                    for n in graph.get("nodes", []):
-                        if "label" in n:
-                            nodes.append(n)
-                        else:
-                            labels_list = n.get("labels", [])
-                            props = n.get("properties", {})
-                            nodes.append({
-                                "id": n["id"],
-                                "label": props.get("name", n["id"]),
-                                "type": labels_list[0] if labels_list else "Concept",
-                                "properties": props,
-                            })
-                    edges = []
-                    for e in graph.get("edges", []):
-                        if "label" in e:
-                            edges.append(e)
-                        else:
-                            edges.append({
-                                "id": e["id"],
-                                "source": e["source"],
-                                "target": e["target"],
-                                "label": e.get("type", "related_to").lower(),
-                                "properties": e.get("properties", {}),
-                            })
+                    nodes = [_normalize_ingest_node(n) for n in graph.get("nodes", [])]
+                    edges = [_normalize_ingest_edge(e) for e in graph.get("edges", [])]
                     await broadcast_fn({
                         "type": "graph_update",
                         "nodes": nodes,
@@ -178,31 +193,8 @@ async def run_ingestion(
         # Send full graph refresh so frontend gets all nodes + edges
         if neo4j_client is not None:
             graph = await neo4j_client.get_full_graph()
-            nodes = []
-            for n in graph.get("nodes", []):
-                if "label" in n:
-                    nodes.append(n)
-                else:
-                    labels_list = n.get("labels", [])
-                    props = n.get("properties", {})
-                    nodes.append({
-                        "id": n["id"],
-                        "label": props.get("name", n["id"]),
-                        "type": labels_list[0] if labels_list else "Concept",
-                        "properties": props,
-                    })
-            edges = []
-            for e in graph.get("edges", []):
-                if "label" in e:
-                    edges.append(e)
-                else:
-                    edges.append({
-                        "id": e["id"],
-                        "source": e["source"],
-                        "target": e["target"],
-                        "label": e.get("type", "related_to").lower(),
-                        "properties": e.get("properties", {}),
-                    })
+            nodes = [_normalize_ingest_node(n) for n in graph.get("nodes", [])]
+            edges = [_normalize_ingest_edge(e) for e in graph.get("edges", [])]
             await broadcast_fn({
                 "type": "graph_update",
                 "nodes": nodes,
