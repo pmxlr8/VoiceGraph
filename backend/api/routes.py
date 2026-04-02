@@ -130,6 +130,167 @@ async def get_graph(request: Request):
     return await client.get_full_graph()
 
 
+@router.get("/graph/summary")
+async def get_graph_summary(request: Request):
+    """Return the top 50 nodes by degree centrality + edges between them.
+
+    Used as the default graph view — shows the most connected concepts.
+    Also returns total counts so the frontend can show "N concepts total".
+    """
+    client = _get_client(request)
+
+    # Total counts
+    total_rows = await client.execute_query(
+        "MATCH (n) RETURN count(n) AS node_count"
+    )
+    total_edge_rows = await client.execute_query(
+        "MATCH ()-[r]->() RETURN count(r) AS edge_count"
+    )
+    total_nodes = total_rows[0]["node_count"] if total_rows else 0
+    total_edges = total_edge_rows[0]["edge_count"] if total_edge_rows else 0
+
+    if total_nodes == 0:
+        return {"nodes": [], "edges": [], "total_nodes": 0, "total_edges": 0}
+
+    # Top 50 by degree
+    top_nodes_raw = await client.execute_query(
+        """
+        MATCH (n)
+        WITH n, size([(n)--() | 1]) AS degree
+        ORDER BY degree DESC
+        LIMIT 50
+        RETURN elementId(n) AS id, n.name AS name, labels(n) AS labels,
+               properties(n) AS properties, degree
+        """
+    )
+
+    top_ids = [r["id"] for r in top_nodes_raw]
+    if not top_ids:
+        return {"nodes": [], "edges": [], "total_nodes": total_nodes, "total_edges": total_edges}
+
+    # Edges between those top nodes
+    edges_raw = await client.execute_query(
+        """
+        MATCH (a)-[r]->(b)
+        WHERE elementId(a) IN $ids AND elementId(b) IN $ids
+        RETURN elementId(r) AS id, type(r) AS type,
+               elementId(a) AS source, elementId(b) AS target,
+               properties(r) AS properties
+        """,
+        {"ids": top_ids},
+    )
+
+    nodes = []
+    for r in top_nodes_raw:
+        nodes.append({
+            "id": r["id"],
+            "labels": r.get("labels", []),
+            "properties": r.get("properties", {}),
+        })
+
+    edges = []
+    for r in edges_raw:
+        edges.append({
+            "id": r["id"],
+            "type": r.get("type", ""),
+            "source": r["source"],
+            "target": r["target"],
+            "properties": r.get("properties", {}),
+        })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+    }
+
+
+@router.get("/user/mind-summary")
+async def get_mind_summary(request: Request):
+    """Return a summary of the user's knowledge graph shape.
+
+    Includes: community count (worldview), depth (longest chain),
+    top clusters, orphan count, and domain coverage.
+    """
+    client = _get_client(request)
+
+    # Total counts
+    total_rows = await client.execute_query("MATCH (n) RETURN count(n) AS cnt")
+    total_nodes = total_rows[0]["cnt"] if total_rows else 0
+
+    if total_nodes < 50:
+        return {
+            "below_threshold": True,
+            "total_nodes": total_nodes,
+            "message": "Add more sources to unlock your knowledge profile.",
+        }
+
+    total_edge_rows = await client.execute_query("MATCH ()-[r]->() RETURN count(r) AS cnt")
+    total_edges = total_edge_rows[0]["cnt"] if total_edge_rows else 0
+
+    # Orphan count
+    orphan_rows = await client.execute_query(
+        "MATCH (n) WHERE NOT (n)--() RETURN count(n) AS cnt"
+    )
+    orphan_count = orphan_rows[0]["cnt"] if orphan_rows else 0
+
+    # Entity type distribution (proxy for clusters)
+    type_rows = await client.execute_query(
+        """
+        MATCH (n)
+        RETURN labels(n)[0] AS type, count(*) AS count,
+               collect(n.name)[..3] AS top_concepts
+        ORDER BY count DESC
+        LIMIT 10
+        """
+    )
+
+    top_clusters = []
+    for row in type_rows[:3]:
+        top_clusters.append({
+            "name": row.get("type", "Unknown"),
+            "size": row.get("count", 0),
+            "top_concepts": row.get("top_concepts", []),
+        })
+
+    worldview = len(type_rows)
+
+    # Depth: longest shortest path approximation (sample-based)
+    depth_rows = await client.execute_query(
+        """
+        MATCH (n)-[r]-()
+        WITH n, count(r) AS deg
+        ORDER BY deg DESC LIMIT 1
+        WITH n
+        MATCH path = (n)-[*1..6]-(m)
+        RETURN max(length(path)) AS max_depth
+        """
+    )
+    depth = depth_rows[0]["max_depth"] if depth_rows and depth_rows[0].get("max_depth") else 0
+
+    # Coverage: compare against expected types for user domain
+    from user.profile import get_profile
+    profile = get_profile()
+    domain = profile.get("domain", "")
+
+    from agents.tools.blind_spot import _get_expected_types
+    expected = _get_expected_types(domain)
+    present_types = {row["type"] for row in type_rows if row.get("type")}
+    present_count = sum(1 for t in expected if t in present_types)
+    coverage_pct = round((present_count / len(expected)) * 100) if expected else 0
+
+    return {
+        "worldview": worldview,
+        "depth": depth,
+        "top_clusters": top_clusters,
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "orphan_count": orphan_count,
+        "coverage_percent": coverage_pct,
+    }
+
+
 @router.get("/graph/node/{node_id:path}", response_model=NodeDetailResponse)
 async def get_node(node_id: str, request: Request):
     """Return a single node with all properties and neighbours."""
@@ -343,6 +504,22 @@ async def get_ingest_status(job_id: str, request: Request):
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return job.to_dict()
+
+
+@router.get("/user/blind-spots")
+async def get_blind_spots(request: Request):
+    """Return blind spots: orphan nodes and underrepresented entity types."""
+    client = _get_client(request)
+    from user.profile import get_profile
+    profile = get_profile()
+    domain = profile.get("domain", "")
+
+    try:
+        from agents.tools.blind_spot import detect_blind_spots
+        return await detect_blind_spots(domain)
+    except Exception as exc:
+        logger.warning("Blind spot detection failed: %s", exc)
+        return {"orphan_nodes": [], "orphan_count": 0, "missing_types": [], "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,12 @@ neo4j-graphrag[google,experimental,fuzzy-matching]
 rdflib
 youtube-transcript-api
 beautifulsoup4
+lxml
 requests
 pandas
 pydantic
+rapidfuzz
+openai-whisper
+metaphone
+python-docx
+pypdf

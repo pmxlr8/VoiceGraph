@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from api.routes import router as graph_router
+from user.profile import router as user_router
 from graph.neo4j_client import Neo4jClient
 from ingestion.job_manager import JobManager
 from extraction.ontology_manager import OntologyManager
@@ -295,7 +296,11 @@ async def handle_text_input(ws: WebSocket, event: dict[str, Any]) -> None:
                 type_names = [", ".join(t.get("types", [])) for t in types_list[:8]]
                 response_text = f"Entity types in the graph: {', '.join(type_names)}." if type_names else "No ontology data available."
 
-        elif any(w in text_lower for w in ["tell me about", "what is", "who is", "explore", "detail", "show me"]):
+        # ---- Concept expansion ----
+        elif any(phrase in text_lower for phrase in [
+            "what do i know about", "tell me about", "what is", "who is",
+            "explore", "detail", "show me", "how does", "in my notes",
+        ]):
             # Entity exploration — extract the entity name
             entity = text
             for prefix in ["tell me about ", "what is ", "who is ", "explore ", "show me ", "details on ", "detail "]:
@@ -450,6 +455,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 app.include_router(graph_router)
+app.include_router(user_router)
 
 
 # ---------------------------------------------------------------------------

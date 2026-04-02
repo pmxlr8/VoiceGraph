@@ -229,9 +229,12 @@ class ExtractionPipeline:
         self,
         neo4j_client: Any = None,
         event_callback: EventCallback = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self._neo4j = neo4j_client
         self._event_callback = event_callback
+        # Metadata applied to every node and edge (collection_name, context, etc.)
+        self._metadata = metadata or {}
 
     # ------------------------------------------------------------------
     # Event broadcasting
@@ -367,13 +370,20 @@ TEXT:
         entities = discovery["entities"]
         relationships = discovery["relationships"]
 
-        # Deduplicate
-        seen: dict[str, dict[str, Any]] = {}
-        for e in entities:
-            name = e.get("name", "")
-            if name and name not in seen:
-                seen[name] = e
-        unique_entities = list(seen.values())
+        # Improved entity resolution with fuzzy matching
+        try:
+            from extraction.entity_resolution import resolve_entities
+            domain = self._metadata.get("domain", "")
+            source_type = self._metadata.get("source_type", "text")
+            unique_entities = resolve_entities(entities, domain=domain, source_type=source_type)
+        except ImportError:
+            logger.warning("entity_resolution not available, falling back to simple dedup")
+            seen: dict[str, dict[str, Any]] = {}
+            for e in entities:
+                name = e.get("name", "")
+                if name and name not in seen:
+                    seen[name] = e
+            unique_entities = list(seen.values())
 
         nodes_created = 0
         edges_created = 0
@@ -717,16 +727,24 @@ TEXT:
             if not label:
                 label = "Entity"
 
+            params = {
+                "name": name, "description": description, "entity_type": entity_type,
+                "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "source_type": self._metadata.get("source_type", "text"),
+                "collection_name": self._metadata.get("collection_name", ""),
+                "context": self._metadata.get("context", "personal"),
+                "document_created_at": self._metadata.get("document_created_at", ""),
+            }
             cypher = (
                 f"MERGE (n:{label} {{name: $name}}) "
-                f"SET n.description = $description, n.entity_type = $entity_type "
+                f"SET n.description = $description, n.entity_type = $entity_type, "
+                f"n.ingested_at = $ingested_at, n.source_type = $source_type, "
+                f"n.collection_name = $collection_name, n.context = $context, "
+                f"n.document_created_at = $document_created_at "
                 f"RETURN n"
             )
             try:
-                await self._neo4j.execute_query(
-                    cypher,
-                    {"name": name, "description": description, "entity_type": entity_type},
-                )
+                await self._neo4j.execute_query(cypher, params)
                 count += 1
             except Exception as exc:
                 logger.warning("Failed to create node '%s': %s", name, exc)
@@ -758,17 +776,25 @@ TEXT:
             if not rel_label:
                 rel_label = "RELATED_TO"
 
+            params = {
+                "source": source, "target": target, "description": description,
+                "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "source_type": self._metadata.get("source_type", "text"),
+                "collection_name": self._metadata.get("collection_name", ""),
+                "context": self._metadata.get("context", "personal"),
+                "document_created_at": self._metadata.get("document_created_at", ""),
+            }
             cypher = (
                 f"MATCH (a {{name: $source}}), (b {{name: $target}}) "
                 f"MERGE (a)-[r:{rel_label}]->(b) "
-                f"SET r.description = $description "
+                f"SET r.description = $description, "
+                f"r.ingested_at = $ingested_at, r.source_type = $source_type, "
+                f"r.collection_name = $collection_name, r.context = $context, "
+                f"r.document_created_at = $document_created_at "
                 f"RETURN r"
             )
             try:
-                await self._neo4j.execute_query(
-                    cypher,
-                    {"source": source, "target": target, "description": description},
-                )
+                await self._neo4j.execute_query(cypher, params)
                 count += 1
             except Exception as exc:
                 logger.warning(

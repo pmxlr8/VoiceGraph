@@ -24,53 +24,41 @@ export interface ReagraphEdge {
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  // Core entity types — pastel palette
-  Person: '#f096b8',       // dusty rose
-  Organization: '#96e0b8', // mint
-  Concept: '#96b8f0',      // cornflower
-  Event: '#f0aa96',        // peach
-  Location: '#aae096',     // sage green
-  Technology: '#aa96f0',   // violet
-  Facility: '#96dce8',     // pale cyan
-  Infrastructure: '#96c0f0', // sky steel
-  Signal: '#e8d496',       // golden
-  Institution: '#d496f0',  // lilac
-  Regulation: '#edc4f7',   // lilac-light
-  Community: '#96e8dc',    // turquoise
-  Commodity: '#f0cc96',    // warm sand
-  Company: '#96e0b8',      // mint (same as Org)
-  Cluster: '#c896f0',      // soft lavender
-
-  // Aliases
-  Field: '#96b8f0',
-  Method: '#f0aa96',
-  Model: '#c896f0',
-  Architecture: '#96c0f0',
-  Theory: '#d496f0',
-  Year: '#96c0f0',
-  Date: '#96c0f0',
-  City: '#aae096',
-  Country: '#aae096',
-  Award: '#e8d496',
-  Equation: '#96dce8',
-  Field_Of_Study: '#96b8f0',
-  FieldOfStudy: '#96b8f0',
-  Scientific_Concept: '#96b8f0',
-  ScientificConcept: '#96b8f0',
-
-  // DC & Energy specific
-  data_center: '#96dce8',
-  hedge_fund: '#f096b8',
-  passive: '#e8d496',
-  active: '#f0aa96',
-  transmission: '#96c0f0',
-  power_plant: '#f09696',
-  fuel_cell: '#96e8dc',
-  mining_facility: '#f0cc96',
-  thermal_energy_network: '#96e0b8',
+  Person:         'hsla(210, 40%, 78%, 0.70)',
+  Organization:   'hsla(150, 35%, 74%, 0.70)',
+  Concept:        'hsla(270, 38%, 78%, 0.70)',
+  Regulation:     'hsla(35,  42%, 76%, 0.70)',
+  Facility:       'hsla(0,   38%, 78%, 0.70)',
+  Community:      'hsla(180, 35%, 74%, 0.70)',
+  Infrastructure: 'hsla(220, 35%, 76%, 0.70)',
+  Dataset:        'hsla(300, 30%, 76%, 0.70)',
+  Institution:    'hsla(60,  38%, 74%, 0.70)',
+  Company:        'hsla(190, 38%, 75%, 0.70)',
+  Paper:          'hsla(240, 35%, 78%, 0.70)',
+  // Aliases — map to same palette style
+  Event:          'hsla(25,  40%, 76%, 0.70)',
+  Location:       'hsla(120, 32%, 74%, 0.70)',
+  Technology:     'hsla(260, 36%, 78%, 0.70)',
+  Field:          'hsla(270, 38%, 78%, 0.70)',
+  Method:         'hsla(25,  40%, 76%, 0.70)',
+  Model:          'hsla(280, 32%, 78%, 0.70)',
+  Architecture:   'hsla(220, 35%, 76%, 0.70)',
+  Theory:         'hsla(290, 30%, 78%, 0.70)',
+  Author:         'hsla(210, 40%, 78%, 0.70)',
+  Finding:        'hsla(50,  38%, 76%, 0.70)',
+  Methodology:    'hsla(160, 35%, 74%, 0.70)',
+  Hypothesis:     'hsla(310, 30%, 78%, 0.70)',
+  Signal:         'hsla(45,  42%, 76%, 0.70)',
+  Commodity:      'hsla(35,  38%, 76%, 0.70)',
+  Cluster:        'hsla(280, 32%, 78%, 0.70)',
+  Year:           'hsla(200, 30%, 76%, 0.70)',
+  Date:           'hsla(200, 30%, 76%, 0.70)',
+  City:           'hsla(120, 32%, 74%, 0.70)',
+  Country:        'hsla(120, 32%, 74%, 0.70)',
+  Award:          'hsla(45,  42%, 76%, 0.70)',
 };
 
-const DEFAULT_COLOR = '#aa96f0';
+const DEFAULT_COLOR = 'hsla(0, 0%, 78%, 0.60)';
 
 export function colorForType(type?: string): string {
   return (type && TYPE_COLORS[type]) || DEFAULT_COLOR;
@@ -95,6 +83,10 @@ interface GraphState {
   // Graph data (raw from server)
   nodes: ReagraphNode[];
   edges: ReagraphEdge[];
+
+  // Incremental mutation counter — watch this instead of graphData reference
+  nodeCount: number;
+  edgeCount: number;
 
   // Selected node
   selectedNodeId: string | null;
@@ -178,6 +170,8 @@ function toReagraphEdge(edge: EventEdge): ReagraphEdge {
 export const useGraphStore = create<GraphState>((set, get) => ({
   nodes: [],
   edges: [],
+  nodeCount: 0,
+  edgeCount: 0,
   selectedNodeId: null,
   selectedNode: null,
   activeNodeIds: new Set<string>(),
@@ -219,56 +213,72 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   // ---- Graph mutations ----
 
-  setGraph: (nodes, edges) =>
+  setGraph: (nodes, edges) => {
+    const rNodes = nodes.map(toReagraphNode);
+    const rEdges = edges.map(toReagraphEdge);
     set({
-      nodes: nodes.map(toReagraphNode),
-      edges: edges.map(toReagraphEdge),
+      nodes: rNodes,
+      edges: rEdges,
+      nodeCount: rNodes.length,
+      edgeCount: rEdges.length,
       activeNodeIds: new Set<string>(),
       activeEdgeIds: new Set<string>(),
       dimAll: false,
       isThinking: false,
-    }),
+    });
+  },
 
-  setNodes: (nodes) => set({ nodes: nodes.map(toReagraphNode) }),
+  setNodes: (nodes) => {
+    const rNodes = nodes.map(toReagraphNode);
+    set({ nodes: rNodes, nodeCount: rNodes.length });
+  },
 
-  setEdges: (edges) => set({ edges: edges.map(toReagraphEdge) }),
+  setEdges: (edges) => {
+    const rEdges = edges.map(toReagraphEdge);
+    set({ edges: rEdges, edgeCount: rEdges.length });
+  },
 
-  addNode: (node) =>
-    set((state) => {
-      const rNode = toReagraphNode(node);
-      // Deduplicate by label (case-insensitive)
-      const exists = state.nodes.some(
-        (n) => n.label.toLowerCase() === rNode.label.toLowerCase(),
-      );
-      if (exists) return state;
-      // Auto-highlight the new node for 3 seconds
-      const newActive = new Set(state.activeNodeIds);
-      newActive.add(rNode.id);
-      setTimeout(() => {
-        const s = get();
-        const updated = new Set(s.activeNodeIds);
-        updated.delete(rNode.id);
-        if (updated.size === 0) {
-          set({ activeNodeIds: updated, dimAll: false });
-        } else {
-          set({ activeNodeIds: updated });
-        }
-      }, 3000);
-      return {
-        nodes: [...state.nodes, rNode],
-        activeNodeIds: newActive,
-        dimAll: true,
-      };
-    }),
+  addNode: (node) => {
+    const state = get();
+    const rNode = toReagraphNode(node);
+    // Deduplicate by label (case-insensitive)
+    const exists = state.nodes.some(
+      (n) => n.label.toLowerCase() === rNode.label.toLowerCase(),
+    );
+    if (exists) return;
+    // Mutate in place — do NOT create a new array reference
+    state.nodes.push(rNode);
+    // Auto-highlight the new node for 3 seconds
+    const newActive = new Set(state.activeNodeIds);
+    newActive.add(rNode.id);
+    setTimeout(() => {
+      const s = get();
+      const updated = new Set(s.activeNodeIds);
+      updated.delete(rNode.id);
+      if (updated.size === 0) {
+        set({ activeNodeIds: updated, dimAll: false });
+      } else {
+        set({ activeNodeIds: updated });
+      }
+    }, 3000);
+    // Bump nodeCount to trigger re-renders that watch the counter
+    set({
+      nodeCount: state.nodes.length,
+      activeNodeIds: newActive,
+      dimAll: true,
+    });
+  },
 
-  addEdge: (edge) =>
-    set((state) => {
-      const rEdge = toReagraphEdge(edge);
-      // Deduplicate
-      const exists = state.edges.some((e) => e.id === rEdge.id);
-      if (exists) return state;
-      return { edges: [...state.edges, rEdge] };
-    }),
+  addEdge: (edge) => {
+    const state = get();
+    const rEdge = toReagraphEdge(edge);
+    // Deduplicate
+    const exists = state.edges.some((e) => e.id === rEdge.id);
+    if (exists) return;
+    // Mutate in place
+    state.edges.push(rEdge);
+    set({ edgeCount: state.edges.length });
+  },
 
   removeNode: (nodeId) =>
     set((state) => ({

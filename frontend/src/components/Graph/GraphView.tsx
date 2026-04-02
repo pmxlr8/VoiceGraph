@@ -67,13 +67,21 @@ const wrap = (s: string, w: number) =>
 // Component
 // ---------------------------------------------------------------------------
 
-export default function GraphView() {
+export default function GraphView({ showingFull, totalNodes, onToggleFull }: {
+  showingFull?: boolean;
+  totalNodes?: number;
+  onToggleFull?: () => void;
+} = {}) {
   const fgRef = useRef<any>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight - 56 });
 
+  const hasZoomed = useRef(false);
+
   const storeNodes = useGraphStore((s) => s.nodes);
   const storeEdges = useGraphStore((s) => s.edges);
+  const nodeCount = useGraphStore((s) => s.nodeCount);
+  const edgeCount = useGraphStore((s) => s.edgeCount);
   const activeNodeIds = useGraphStore((s) => s.activeNodeIds);
   const dimAll = useGraphStore((s) => s.dimAll);
   const selectNode = useGraphStore((s) => s.selectNode);
@@ -145,7 +153,44 @@ export default function GraphView() {
     fg.d3Force('charge')?.strength(-250).distanceMax(500);
     fg.d3Force('link')?.distance(120);
     fg.d3Force('center')?.strength(0.05);
+
+    // Collection clustering force — pull nodes toward their collection's centroid
+    const COLLECTION_SEEDS = [
+      { x: -200, y: 100, z: 0 },
+      { x: 200, y: 100, z: 0 },
+      { x: 0, y: -200, z: 0 },
+      { x: 0, y: 100, z: 200 },
+      { x: -150, y: -150, z: 150 },
+      { x: 150, y: -150, z: -150 },
+    ];
+    const collectionIndexMap: Record<string, number> = {};
+    let collIdx = 0;
+
+    fg.d3Force('collection', () => {
+      const internalNodes = fg.graphData?.()?.nodes;
+      if (!internalNodes) return;
+      for (const node of internalNodes) {
+        const coll = (node as any).collection_name || (node as any).data?.collection_name;
+        if (!coll) continue;
+        if (!(coll in collectionIndexMap)) {
+          collectionIndexMap[coll] = collIdx % COLLECTION_SEEDS.length;
+          collIdx++;
+        }
+        const seed = COLLECTION_SEEDS[collectionIndexMap[coll]];
+        node.vx = (node.vx || 0) + (seed.x - (node.x || 0)) * 0.008;
+        node.vy = (node.vy || 0) + (seed.y - (node.y || 0)) * 0.008;
+        node.vz = (node.vz || 0) + (seed.z - (node.z || 0)) * 0.008;
+      }
+    });
   }, [graphData]);
+
+  // When incremental nodes/edges are added (in-place mutation), tell ForceGraph to refresh
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg || nodeCount === 0) return;
+    // Re-heat simulation slightly so new nodes find position
+    fg.d3ReheatSimulation?.();
+  }, [nodeCount, edgeCount]);
 
   // nodeColor callback — reads highlight state from refs (always fresh)
   // Returns a NEW function reference when highlights change so ForceGraph3D
@@ -155,7 +200,9 @@ export default function GraphView() {
       const type = node.type || 'Entity';
       const baseColor = colorForType(type);
       if (dimAllRef.current) {
-        return activeNodeIdsRef.current.has(node.id) ? '#4a6ab8' : baseColor + '30';
+        return activeNodeIdsRef.current.has(node.id)
+          ? 'hsla(45, 80%, 65%, 0.85)'
+          : 'hsla(0, 0%, 78%, 0.12)';
       }
       return baseColor;
     },
@@ -180,16 +227,15 @@ export default function GraphView() {
         if (mesh?.material?.color) {
           const type = node.type || 'Entity';
           const baseColor = colorForType(type);
-          let color = baseColor;
           if (dimAll) {
-            color = activeNodeIds.has(node.id) ? '#4a6ab8' : baseColor + '30';
-          }
-          mesh.material.color.set(color);
-          if (dimAll) {
-            mesh.material.opacity = activeNodeIds.has(node.id) ? 1.0 : 0.15;
+            const isActive = activeNodeIds.has(node.id);
+            mesh.material.color.set(isActive ? 'hsla(45, 80%, 65%, 0.85)' : 'hsla(0, 0%, 78%, 0.12)');
+            mesh.material.opacity = isActive ? 0.85 : 0.12;
             mesh.material.transparent = true;
           } else {
-            mesh.material.opacity = 0.9;
+            mesh.material.color.set(baseColor);
+            mesh.material.opacity = 0.70;
+            mesh.material.transparent = true;
           }
         }
       }
@@ -270,13 +316,9 @@ export default function GraphView() {
     const sourceNode = typeof link.source === 'object' ? link.source : null;
     if (dimAllRef.current && sourceNode) {
       const isActive = activeNodeIdsRef.current.has(sourceNode.id);
-      return isActive ? 'rgba(74, 106, 184, 0.5)' : 'rgba(100, 110, 130, 0.08)';
+      return isActive ? 'hsla(45, 80%, 65%, 0.85)' : 'hsla(0, 0%, 70%, 0.08)';
     }
-    if (sourceNode) {
-      const baseColor = colorForType(sourceNode.type);
-      return baseColor + '40';
-    }
-    return 'rgba(100, 110, 130, 0.30)';
+    return 'hsla(0, 0%, 70%, 0.30)';
   }, []);
 
   // Link particle color
@@ -324,7 +366,7 @@ export default function GraphView() {
         width={dimensions.width}
         height={dimensions.height}
         graphData={graphData}
-        nodeOpacity={0.9}
+        nodeOpacity={0.70}
         nodeLabel="label"
         nodeVal={getNodeVal}
         nodeRelSize={5}
@@ -356,9 +398,10 @@ export default function GraphView() {
         warmupTicks={80}
         cooldownTicks={300}
         onEngineStop={() => {
-          // Spread nodes further apart after initial simulation
-          const fg = fgRef.current;
-          if (fg) fg.zoomToFit(400, 80);
+          if (!hasZoomed.current && fgRef.current) {
+            fgRef.current.zoomToFit(400, 80);
+            hasZoomed.current = true;
+          }
         }}
         onLinkClick={(link: FGLink) => {
           if (fgRef.current) (fgRef.current as any).emitParticle(link);
@@ -404,10 +447,25 @@ export default function GraphView() {
         </button>
       </div>
 
-      {/* Status indicator — bottom left */}
-      <div className="glass-4 absolute bottom-3 left-3 flex items-center gap-2 text-[11px] text-text-secondary px-2.5 py-1 z-10">
-        <span className="h-2 w-2 rounded-full" style={{ background: '#96e0b8', boxShadow: '0 0 6px rgba(150,224,184,0.6)' }} />
-        Ready
+      {/* Status indicator + graph toggle — bottom left */}
+      <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 z-10">
+        {onToggleFull && (
+          <button
+            onClick={onToggleFull}
+            className="glass-3 text-[11px] text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-lg transition-colors text-left"
+          >
+            {showingFull ? 'Showing all nodes · Top 50 →' : `Showing top 50 nodes · Show all →`}
+            {totalNodes != null && totalNodes > 0 && (
+              <span className="block text-[10px] text-text-muted mt-0.5">
+                {totalNodes} concepts in your knowledge base
+              </span>
+            )}
+          </button>
+        )}
+        <div className="glass-4 flex items-center gap-2 text-[11px] text-text-secondary px-2.5 py-1">
+          <span className="h-2 w-2 rounded-full" style={{ background: 'hsla(150, 35%, 74%, 0.90)', boxShadow: '0 0 6px hsla(150, 35%, 74%, 0.6)' }} />
+          Ready
+        </div>
       </div>
     </div>
     </GraphErrorBoundary>
