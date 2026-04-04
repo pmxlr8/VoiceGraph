@@ -15,7 +15,6 @@ import ActivityPanel from './components/ActivityPanel/ActivityPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
 import { useGraphStore } from './stores/graphStore';
-import { useVoiceStore } from './stores/voiceStore';
 
 
 export type View = 'graph' | 'query' | 'ontology' | 'mind';
