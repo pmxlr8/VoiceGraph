@@ -25,7 +25,7 @@ interface OnboardingProps {
 }
 
 export default function Onboarding({ onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<'role' | 'domain' | 'done'>('role');
+  const [step, setStep] = useState<'role' | 'domain'>('role');
   const [role, setRole] = useState('');
   const [domain, setDomain] = useState('');
 
@@ -38,7 +38,6 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     localStorage.setItem('voicegraph_onboarded', 'true');
     localStorage.setItem('voicegraph_profile', JSON.stringify(profile));
 
-    // POST to backend
     fetch('/api/user/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,41 +48,69 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: '#09090b' }}>
-      <div className="w-full max-w-lg px-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center mesh-bg">
+      <div className="w-full max-w-xl px-10 py-12 glass-1 rounded-3xl" style={{ boxShadow: '0 8px 60px rgba(107,141,214,0.10)' }}>
+
         {step === 'role' && (
-          <div className="space-y-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-text-primary">Who are you?</h1>
-              <p className="mt-2 text-sm text-text-muted">
-                This shapes how VoiceGraph builds and interprets your knowledge.
+          <div className="space-y-8">
+            {/* Header */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ fontFamily: "'Syne', sans-serif", color: '#6b8dd6' }}>
+                Step 1 of 2
+              </p>
+              <h1 className="text-3xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: 'rgba(30,36,60,0.92)' }}>
+                Who are you?
+              </h1>
+              <p className="text-[15px] text-text-muted leading-relaxed">
+                This shapes how VoiceGraph builds and interprets your knowledge graph.
               </p>
             </div>
+
+            {/* Text input */}
             <input
               type="text"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              placeholder="e.g. PhD researcher in computational biology, Cardiologist at NYU, Investigative journalist"
-              className="w-full glass-2 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-muted bg-transparent focus:outline-none focus:ring-1 focus:ring-white/20"
+              placeholder="e.g. PhD researcher in computational biology, Cardiologist at NYU..."
+              className="w-full glass-2 rounded-xl px-5 py-4 text-[14px] text-text-primary placeholder:text-text-muted bg-transparent focus:outline-none focus:ring-2 focus:ring-indigo-300/40 transition-shadow"
+              style={{ fontFamily: "'DM Sans', sans-serif" }}
             />
-            <div className="flex flex-wrap gap-2">
+
+            {/* Chips */}
+            <div className="flex flex-wrap gap-2.5">
               {ROLE_CHIPS.map((chip) => (
                 <button
                   key={chip}
                   onClick={() => setRole(chip)}
-                  className={`glass-3 px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    role === chip ? 'text-text-primary ring-1 ring-white/30' : 'text-text-secondary hover:text-text-primary'
-                  }`}
+                  className="transition-all"
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontFamily: "'DM Sans', sans-serif",
+                    fontWeight: role === chip ? 600 : 400,
+                    background: role === chip ? 'linear-gradient(135deg, rgba(107,141,214,0.18), rgba(155,107,214,0.14))' : 'rgba(255,255,255,0.45)',
+                    border: role === chip ? '1.5px solid rgba(107,141,214,0.35)' : '1px solid rgba(180,200,230,0.30)',
+                    color: role === chip ? 'rgba(30,36,60,0.92)' : 'rgba(30,36,60,0.55)',
+                    backdropFilter: 'blur(8px)',
+                  }}
                 >
                   {chip}
                 </button>
               ))}
             </div>
+
+            {/* Continue */}
             <button
               onClick={() => role.trim() && setStep('domain')}
               disabled={!role.trim()}
-              className="w-full py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
-              style={{ background: 'hsla(45, 80%, 65%, 0.85)', color: '#09090b' }}
+              className="w-full py-4 rounded-xl text-[15px] font-semibold transition-all disabled:opacity-25 cursor-pointer disabled:cursor-not-allowed"
+              style={{
+                fontFamily: "'Syne', sans-serif",
+                background: 'linear-gradient(135deg, #6b8dd6, #9b6bd6)',
+                color: '#fff',
+                letterSpacing: '0.02em',
+              }}
             >
               Continue
             </button>
@@ -91,53 +118,86 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         )}
 
         {step === 'domain' && (
-          <div className="space-y-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-text-primary">What's your main domain?</h1>
+          <div className="space-y-8">
+            {/* Header */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ fontFamily: "'Syne', sans-serif", color: '#9b6bd6' }}>
+                Step 2 of 2
+              </p>
+              <h1 className="text-3xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: 'rgba(30,36,60,0.92)' }}>
+                What's your domain?
+              </h1>
+              <p className="text-[15px] text-text-muted leading-relaxed">
+                We'll tailor extraction and organization to your field.
+              </p>
             </div>
+
+            {/* Text input */}
             <input
               type="text"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
-              placeholder="e.g. Kidney disease research, Constitutional law, Climate tech"
-              className="w-full glass-2 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-muted bg-transparent focus:outline-none focus:ring-1 focus:ring-white/20"
+              placeholder="e.g. Kidney disease research, Constitutional law, Climate tech..."
+              className="w-full glass-2 rounded-xl px-5 py-4 text-[14px] text-text-primary placeholder:text-text-muted bg-transparent focus:outline-none focus:ring-2 focus:ring-violet-300/40 transition-shadow"
+              style={{ fontFamily: "'DM Sans', sans-serif" }}
             />
-            <div className="flex flex-wrap gap-2">
+
+            {/* Chips */}
+            <div className="flex flex-wrap gap-2.5">
               {DOMAIN_CHIPS.map((chip) => (
                 <button
                   key={chip}
                   onClick={() => setDomain(chip)}
-                  className={`glass-3 px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    domain === chip ? 'text-text-primary ring-1 ring-white/30' : 'text-text-secondary hover:text-text-primary'
-                  }`}
+                  className="transition-all"
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontFamily: "'DM Sans', sans-serif",
+                    fontWeight: domain === chip ? 600 : 400,
+                    background: domain === chip ? 'linear-gradient(135deg, rgba(155,107,214,0.18), rgba(107,141,214,0.14))' : 'rgba(255,255,255,0.45)',
+                    border: domain === chip ? '1.5px solid rgba(155,107,214,0.35)' : '1px solid rgba(180,200,230,0.30)',
+                    color: domain === chip ? 'rgba(30,36,60,0.92)' : 'rgba(30,36,60,0.55)',
+                    backdropFilter: 'blur(8px)',
+                  }}
                 >
                   {chip}
                 </button>
               ))}
             </div>
+
+            {/* Summary + actions */}
+            {domain.trim() && (
+              <p className="text-[14px] text-text-secondary text-center leading-relaxed" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+                Great — building your graph as a <span className="font-semibold text-text-primary">{role}</span> in <span className="font-semibold text-text-primary">{domain}</span>.
+              </p>
+            )}
+
             <div className="space-y-3">
-              {domain.trim() && (
-                <p className="text-sm text-text-secondary text-center">
-                  Got it. We'll organize your knowledge as a <span className="text-text-primary font-medium">{role}</span> focused on <span className="text-text-primary font-medium">{domain}</span>.
-                </p>
-              )}
               <button
                 onClick={handleFinish}
                 disabled={!domain.trim()}
-                className="w-full py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
-                style={{ background: 'hsla(45, 80%, 65%, 0.85)', color: '#09090b' }}
+                className="w-full py-4 rounded-xl text-[15px] font-semibold transition-all disabled:opacity-25 cursor-pointer disabled:cursor-not-allowed"
+                style={{
+                  fontFamily: "'Syne', sans-serif",
+                  background: 'linear-gradient(135deg, #6b8dd6, #9b6bd6)',
+                  color: '#fff',
+                  letterSpacing: '0.02em',
+                }}
               >
                 Start building →
               </button>
               <button
                 onClick={() => setStep('role')}
-                className="w-full py-2 text-xs text-text-muted hover:text-text-secondary transition-colors"
+                className="w-full py-2.5 text-[13px] text-text-muted hover:text-text-primary transition-colors"
+                style={{ fontFamily: "'DM Sans', sans-serif" }}
               >
                 ← Back
               </button>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

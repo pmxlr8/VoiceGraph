@@ -56,7 +56,6 @@ function App() {
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId);
   const isThinking = useGraphStore((s) => s.isThinking);
 
-  // Onboarding gate
   const [onboarded, setOnboarded] = useState(() =>
     localStorage.getItem('voicegraph_onboarded') === 'true'
   );
@@ -84,7 +83,6 @@ function App() {
     useGraphStore.getState().thinkingClear();
   }, [stopPlayback, sendEvent]);
 
-  // Fetch graph on mount (summary = top 50 by default)
   useEffect(() => {
     if (onboarded) {
       fetchAndLoadGraph(false).then(({ totalNodes: t }) => setTotalNodes(t)).catch(() => {});
@@ -101,38 +99,20 @@ function App() {
     setOnboarded(true);
   }, []);
 
-  // Keyboard shortcut: Ctrl+Shift+T to load test graph
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
-        e.preventDefault();
-        const count = prompt('How many test nodes?', '1000');
-        if (!count) return;
-        fetch(`/api/test/generate?n=${count}`)
-          .then((r) => r.json())
-          .then((data) => {
-            useGraphStore.getState().setGraph(data.nodes, data.edges);
-          })
-          .catch((err) => alert('Failed: ' + err.message));
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  // Show onboarding if not completed
   if (!onboarded) {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
+
+  const hasRight = currentView === 'graph' && !!selectedNodeId;
 
   return (
     <div
       className="relative h-screen w-screen overflow-hidden"
       style={{
         display: 'grid',
-        gridTemplateRows: '52px 1fr 64px',
-        gridTemplateColumns: selectedNodeId && currentView === 'graph' ? '280px 1fr 320px' : '280px 1fr',
-        gridTemplateAreas: selectedNodeId && currentView === 'graph'
+        gridTemplateRows: '52px 1fr 56px',
+        gridTemplateColumns: hasRight ? '260px 1fr 300px' : '260px 1fr',
+        gridTemplateAreas: hasRight
           ? `"nav nav nav" "left main right" "bar bar bar"`
           : `"nav nav" "left main" "bar bar"`,
         gap: '8px',
@@ -140,7 +120,7 @@ function App() {
         zIndex: 1,
       }}
     >
-      {/* Nav — Row 1 */}
+      {/* ─── Nav ─── */}
       <div style={{ gridArea: 'nav' }}>
         <TopBar
           currentView={currentView}
@@ -149,13 +129,13 @@ function App() {
         />
       </div>
 
-      {/* Left panel — Activity / Agent Trace */}
+      {/* ─── Left panel ─── */}
       <div style={{ gridArea: 'left', overflow: 'hidden' }} className="flex flex-col gap-2">
         <ActivityPanel />
         <YourMind />
       </div>
 
-      {/* Main content — Graph / Query / Ontology / Mind */}
+      {/* ─── Main content ─── */}
       <div style={{ gridArea: 'main', position: 'relative', overflow: 'hidden', borderRadius: '16px' }}>
         {currentView === 'graph' && (
           <GraphView
@@ -167,17 +147,14 @@ function App() {
         {currentView === 'query' && <QueryView sendEvent={sendEvent} />}
         {currentView === 'ontology' && <OntologyView />}
 
-        {/* ThoughtStream overlay — top right of graph */}
         <div className="absolute top-4 right-4 z-10">
           <ThoughtStream />
         </div>
 
-        {/* Blind spot banner — top center */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-[500px] max-w-[80%]">
           <BlindSpotBanner />
         </div>
 
-        {/* Time slider — bottom center of graph */}
         {currentView === 'graph' && (
           <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 w-[400px] max-w-[60%]">
             <TimeSlider />
@@ -185,39 +162,34 @@ function App() {
         )}
       </div>
 
-      {/* Right panel — Node detail (only when node selected on graph view) */}
-      {currentView === 'graph' && selectedNodeId && (
+      {/* ─── Right panel ─── */}
+      {hasRight && (
         <div style={{ gridArea: 'right', overflow: 'hidden' }}>
           <InfoSidebar />
         </div>
       )}
 
-      {/* Voice bar — Row 3 */}
-      <div style={{ gridArea: 'bar' }} className="glass-1 flex items-center px-4 gap-3">
-        {/* + button for bottom sheet */}
+      {/* ─── Bottom bar ─── */}
+      <div
+        style={{ gridArea: 'bar' }}
+        className="glass-1 flex items-center gap-3 px-4 rounded-xl"
+      >
+        {/* Add source button */}
         <button
           onClick={() => setShowIngest(true)}
-          className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center text-lg text-text-secondary hover:text-text-primary glass-3 transition-colors"
+          className="shrink-0 h-9 w-9 rounded-xl flex items-center justify-center glass-3 hover:bg-white/60 transition-all"
+          style={{
+            fontSize: 18,
+            color: 'rgba(30,36,60,0.50)',
+            border: '1px solid rgba(180,200,230,0.25)',
+          }}
+          title="Add source"
         >
           +
         </button>
 
-        {/* Recent queries */}
-        <div className="flex gap-1.5 flex-shrink-0 overflow-x-auto max-w-[180px]" style={{ scrollbarWidth: 'none' }}>
-          {useVoiceStore.getState().transcript.slice(-3).filter(t => t.role === 'user').map((t, i) => (
-            <button
-              key={i}
-              onClick={() => { setChatText(t.text); }}
-              className="glass-3 whitespace-nowrap text-[11px] font-normal px-3 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-colors"
-              style={{ letterSpacing: '-0.01em' }}
-            >
-              {t.text.length > 20 ? t.text.slice(0, 20) + '...' : t.text}
-            </button>
-          ))}
-        </div>
-
-        {/* Voice input wrap */}
-        <div className="flex-1 flex items-center gap-2.5 glass-2 h-10 px-3.5 rounded-xl">
+        {/* Text input */}
+        <div className="flex-1 flex items-center gap-2 glass-2 rounded-xl px-4" style={{ height: 40 }}>
           <input
             type="text"
             value={chatText}
@@ -228,49 +200,63 @@ function App() {
             className="flex-1 bg-transparent text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-40"
             style={{ fontFamily: "'DM Sans', sans-serif" }}
           />
+
+          {/* Ask */}
           <button
             onClick={handleChatSubmit}
             disabled={isThinking || !chatText.trim()}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-            style={{ background: 'hsla(45, 80%, 65%, 0.85)', color: '#09090b' }}
+            className="shrink-0 rounded-lg px-4 py-1.5 text-[12px] font-semibold disabled:opacity-25 disabled:cursor-not-allowed transition-all"
+            style={{
+              fontFamily: "'Syne', sans-serif",
+              background: 'linear-gradient(135deg, #6b8dd6, #9b6bd6)',
+              color: '#fff',
+              letterSpacing: '0.02em',
+            }}
           >
             Ask
           </button>
+        </div>
+
+        {/* Voice controls */}
+        <div className="shrink-0 flex items-center gap-2">
           <VoicePanel sendEvent={sendEvent} />
-          {/* Interrupt button — stops agent mid-speech */}
+
+          {/* Interrupt */}
           <button
             onClick={handleInterrupt}
-            className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+            className="h-8 w-8 rounded-lg flex items-center justify-center transition-all hover:bg-red-50"
             style={{
-              background: 'rgba(239, 68, 68, 0.08)',
-              border: '1px solid rgba(239, 68, 68, 0.25)',
+              border: '1px solid rgba(239, 68, 68, 0.20)',
               color: '#ef4444',
             }}
             title="Interrupt agent"
           >
-            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Agent status */}
-        <div className="glass-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap">
+        {/* Status dot */}
+        <div className="shrink-0 glass-3 flex items-center gap-2 px-3 py-1.5 rounded-lg">
           <span
-            className="h-1.5 w-1.5 rounded-full"
+            className="h-2 w-2 rounded-full"
             style={{
-              background: isThinking ? 'hsla(210, 40%, 78%, 0.90)' : 'hsla(150, 35%, 74%, 0.90)',
-              boxShadow: isThinking ? '0 0 6px hsla(210, 40%, 78%, 0.6)' : '0 0 6px hsla(150, 35%, 74%, 0.6)',
+              background: isThinking ? '#96b8f0' : '#96e0b8',
+              boxShadow: isThinking ? '0 0 6px rgba(150,184,240,0.6)' : '0 0 6px rgba(150,224,184,0.6)',
               animation: isThinking ? 'blink 0.8s ease-in-out infinite' : 'none',
             }}
           />
-          <span className="text-[11px] font-medium text-text-secondary" style={{ letterSpacing: '0.01em' }}>
+          <span
+            className="text-[11px] font-medium text-text-secondary"
+            style={{ fontFamily: "'DM Sans', sans-serif", letterSpacing: '0.02em' }}
+          >
             {isThinking ? 'Thinking...' : 'Ready'}
           </span>
         </div>
       </div>
 
-      {/* Bottom sheet ingestion */}
+      {/* Bottom sheet */}
       <BottomSheet open={showIngest} onClose={() => setShowIngest(false)} />
     </div>
   );
