@@ -64,6 +64,7 @@ async def run_ingestion(
     neo4j_client: Any,
     ontology_manager: Any,
     broadcast_fn: BroadcastFn,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute ingestion: extract entities with Gemini → store in Neo4j → broadcast updates."""
 
@@ -177,6 +178,7 @@ async def run_ingestion(
         pipeline = ExtractionPipeline(
             neo4j_client=pipeline_neo4j,
             event_callback=pipeline_event_callback,
+            metadata=metadata or {"source_type": source_type},
         )
 
         result = await pipeline.run(content, source_type)
