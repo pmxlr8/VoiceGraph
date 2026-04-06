@@ -375,7 +375,7 @@ export default function GraphView({ showingFull, totalNodes, onToggleFull }: {
         nodeRelSize={5}
         enableNodeDrag={true}
         nodeColor={getNodeColor}
-        backgroundColor="rgba(0,0,0,0)"
+        backgroundColor="#e8e4f0"
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={true}
         onNodeClick={handleNodeClick}
