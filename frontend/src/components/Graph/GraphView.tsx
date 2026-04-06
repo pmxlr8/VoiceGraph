@@ -363,7 +363,7 @@ export default function GraphView({ showingFull, totalNodes, onToggleFull }: {
 
   return (
     <GraphErrorBoundary>
-    <div ref={containerRef} className="absolute inset-0">
+    <div ref={containerRef} className="absolute inset-0 mesh-bg" style={{ borderRadius: 'inherit' }}>
       <ForceGraph3D
         ref={fgRef}
         width={dimensions.width}
